@@ -1,20 +1,19 @@
 package main
 
 import (
-    "bufio"
-    "errors"
     "context"
     "fmt"
-    "ioutil"
+    "io/ioutil"
+    "log"
     "net/http"
 
-    "github.com/multi-tier-cloud/lca"
+    "github.com/Multi-Tier-Cloud/service-manager/lca"
 )
 
 var lcaClient lca.LCAClient
 
 // Stub
-func getDNSMapping(serviceID string) (string, err) {
+func getDNSMapping(serviceID string) (string, error) {
     return serviceID, nil
 }
 
@@ -41,24 +40,28 @@ func handler(w http.ResponseWriter, r *http.Request) {
     resp, err := http.Get(serviceAddress)
     if err != nil {
         resp.Body.Close()
-        return "", err
+        fmt.Fprintf(w, "%s", err)
     }
     defer resp.Body.Close()
 
     // 7. return result
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
-        return "", err
+        fmt.Fprintf(w, "%s", err)
     }
 
-    return string(body)
+    fmt.Fprintf(w, string(body))
 }
 
 func main() {
 
     // Setup LCA Client
+    var err error
     ctx := context.Background()
-    lcaClient = lca.NewLCAClient(ctx, "hello-world-server", "10.11.17.3:8080")
+    lcaClient, err = lca.NewLCAClient(ctx, "hello-world-server", "10.11.17.3:8080")
+    if err != nil {
+        panic(err)
+    }
 
     // Setup HTTP proxy service
     http.HandleFunc("/", handler)

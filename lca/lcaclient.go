@@ -2,7 +2,6 @@ package lca
 
 import (
     "bufio"
-    "errors"
     "context"
     "fmt"
     "regexp"
@@ -18,20 +17,19 @@ type LCAClient struct {
 }
 
 func (lca *LCAClient) FindService(serviceHash string) (string, error) {
-    peerChan, err := lca.Host.routingDiscovery.FindPeers(lca.Ctx, serviceHash)
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
     if err != nil {
         panic(err)
     }
 
-    peers := SortPeers(peerChan)
+    peers := SortPeers(peerChan, lca.Host)
 
     found := 0
     for _, p := range peers {
-        stream, err := lca.Host.Host.NewStream(lca.Ctx, p.ID, LCAClientProtocolID))
+        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAClientProtocolID)
         if err != nil {
             continue
         } else {
-            logger.Info("Requesting microservice from:", p.ID)
             rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
             str, err := rw.ReadString('\n')
             if err != nil {
@@ -48,24 +46,24 @@ func (lca *LCAClient) FindService(serviceHash string) (string, error) {
             }
 
             if match {
-                logger.Info("Response valid")
                 return str, nil
             }
 
-            logger.Info("Microservice found at", result)
             found = 1
             break
         }
     }
+
     if found != 1 {
         panic("No reachable LCAs exist.")
     }
+
+    return "", ErrUhOh
 }
 
-func requestAlloc(stream network.Stream, string serviceHash)
+func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-    logger.Info("Sending request string")
-    _, err := rw.WriteString(fmt.Sprintf("start program %s\n", serviceName))
+    _, err := rw.WriteString(fmt.Sprintf("start program %s\n", serviceHash))
     if err != nil {
         fmt.Println("Error writing to buffer")
         panic(err)
@@ -82,19 +80,15 @@ func requestAlloc(stream network.Stream, string serviceHash)
         panic(err)
     }
     str = strings.TrimSuffix(str, "\n")
-    logger.Info("Got response:", str)
 
-    logger.Info("Closing stream")
     stream.Close()
 
-    logger.Info("Validating response")
     match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
     if err != nil {
         return "", err
     }
 
     if match {
-        logger.Info("Response valid")
         return str, nil
     }
 
@@ -102,38 +96,39 @@ func requestAlloc(stream network.Stream, string serviceHash)
 }
 
 func (lca *LCAClient) AllocService(serviceHash string) (string, error) {
-    peerChan, err := lca.Host.routingDiscovery.FindPeers(lca.Ctx, lca.Rendezvous)
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAServerRendezvous)
     if err != nil {
         panic(err)
     }
 
-    peers := SortPeers(peerChan)
+    peers := SortPeers(peerChan, lca.Host)
 
     found := 0
     for _, p := range peers {
-        stream, err := lca.Host.Host.NewStream(lca.Ctx, p.ID, LCAServerProtocol))
+        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAServerProtocolID)
         if err != nil {
             continue
         } else {
-            logger.Info("Requesting microservice from:", p.ID)
             result, err := requestAlloc(stream, serviceHash)
             if err != nil {
-                logger.Info("Error:", err)
                 continue
             }
 
-            logger.Info("Microservice created at", result)
+            return result, nil
             found = 1
             break
         }
     }
+
     if found != 1 {
         panic("No reachable LCAs exist.")
     }
+
+    return "", ErrUhOh
 }
 
 // Stub
-func pingService(serviceName) err {
+func pingService() error {
     return nil
 }
 
@@ -165,7 +160,7 @@ func LCAClientHandler(stream network.Stream) {
    }
 }
 
-func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string) LCAClient, err {
+func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string) (LCAClient, error) {
     var err error
 
     var node LCAClient
@@ -174,7 +169,7 @@ func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string
 
     node.Host, err = New(ctx, nil, LCAClientHandler, LCAClientProtocolID, LCAClientRendezvous)
     if err != nil {
-        return nil, err
+        return node, err
     }
 
     return node, nil

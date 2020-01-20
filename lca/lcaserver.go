@@ -8,7 +8,6 @@ import (
     "strings"
 
     "github.com/libp2p/go-libp2p-core/network"
-    "github.com/libp2p/go-libp2p-core/protocol"
 )
 
 
@@ -22,7 +21,6 @@ func dockerAlloc(serviceHash string) (string, error) {
 }
 
 func respondToAlloc(stream network.Stream) {
-    logger.Info("Got a new request")
 
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     str, err := rw.ReadString('\n')
@@ -31,7 +29,6 @@ func respondToAlloc(stream network.Stream) {
         panic(err)
     }
     str = strings.TrimSuffix(str, "\n")
-    logger.Info("Got string:", str)
 
     r := regexp.MustCompile("(.*?)\\s(.*?)$")
     match := r.FindStringSubmatch(str)
@@ -52,7 +49,6 @@ func respondToAlloc(stream network.Stream) {
                 fmt.Println("Error flushing buffer")
                 panic(err)
             }
-            logger.Info("Sent microservice %s", strings.TrimSuffix(result, "\n"))
         }
         default: {
             rw.WriteString("Error\n")
@@ -65,26 +61,24 @@ func respondToAlloc(stream network.Stream) {
                 fmt.Println("Error flushing buffer")
                 panic(err)
             }
-            logger.Info("Requested microservice invalid")
        }
     }
 
-    logger.Info("Closing stream")
     stream.Close()
 }
 
 func LCAServerHandler(stream network.Stream) {
-    respondToServiceRequest(stream)
+    respondToAlloc(stream)
 }
 
-func NewLCAServer(ctx context.Context) LCAServer, err {
+func NewLCAServer(ctx context.Context) (LCAServer, error) {
     var err error
 
     var node LCAServer
 
     node.Host, err = New(ctx, nil, LCAServerHandler, LCAServerProtocolID, LCAServerRendezvous)
     if err != nil {
-        return nil, err
+        return node, err
     }
 
     return node, nil
