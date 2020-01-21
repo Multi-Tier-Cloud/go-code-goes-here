@@ -23,7 +23,8 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 
     // 1. separate first section (service name) and rest (arguments)
     serviceName := r.URL.Path[1:] // TODO: make this support arguments
-    serviceHash, err := getDNSMapping(serviceName)
+    //serviceHash, err := getDNSMapping(serviceName)
+    serviceHash := "hello-world-server"
     if err != nil {
         fmt.Fprintf(w, "%s\n", err)
         panic(err)
@@ -69,12 +70,13 @@ func main() {
     switch len(os.Args) {
         case 1: {
             fmt.Println("Starting LCAClient in client mode")
-            lcaClient, err = lca.NewLCAClient(ctx, "_do_not_find", "")
+            lcaClient, err = lca.NewLCAClient(ctx, "_do_not_find", "_do_not_find")
         }
         case 3: {
             fmt.Println("Starting LCAClient in service mode with arguments",
                         os.Args[1], os.Args[2])
-            lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
+            //lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
+            lcaClient, err = lca.NewLCAClient(ctx, "hello-world-server", "10.11.17.3")
         }
         default: {
             panic("Usage:$./proxyserver [serviceName ipAddress:port]")
