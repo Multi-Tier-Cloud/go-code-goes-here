@@ -19,50 +19,46 @@ func getDNSMapping(serviceName string) (string, error) {
 }
 
 func requestHandler(w http.ResponseWriter, r *http.Request) {
-    fmt.Printf("Got request: %s", r.URL.Path[1:])
+    fmt.Println("Got request:", r.URL.Path[1:])
 
     // 1. separate first section (service name) and rest (arguments)
     serviceName := r.URL.Path[1:] // TODO: make this support arguments
     serviceHash, err := getDNSMapping(serviceName)
     if err != nil {
-        fmt.Println(err)
-        fmt.Fprintf(w, "%s", err)
-        return
+        fmt.Fprintf(w, "%s\n", err)
+        panic(err)
     }
 
     // 3. if does not exist, use libp2p connection to find/create service
-    fmt.Printf("Finding best existing service instance")
+    fmt.Println("Finding best existing service instance")
     serviceAddress, err := lcaClient.FindService(serviceHash)
     if err != nil {
-        fmt.Printf("Could not find, creating new service instance")
+        fmt.Println("Could not find, creating new service instance")
         serviceAddress, err = lcaClient.AllocService(serviceHash)
         if err != nil {
-            fmt.Println(err)
-            fmt.Fprintf(w, "%s", err)
-            return
+            fmt.Println("No services able to be found or created")
+            panic(err)
         }
     }
 
     // 5. run request
-    fmt.Printf("Running request")
+    fmt.Println("Running request")
     resp, err := http.Get(serviceAddress)
     if err != nil {
-        fmt.Println(err)
-        fmt.Fprintf(w, "%s", err)
-        return
+        fmt.Fprintf(w, "%s\n", err)
+        panic(err)
     }
     defer resp.Body.Close()
 
     // 7. return result
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
-        fmt.Println(err)
-        fmt.Fprintf(w, "%s", err)
-        return
+        fmt.Fprintf(w, "%s\n", err)
+        panic(err)
     }
 
+    fmt.Fprintf(w,"%s\n", string(body))
     fmt.Println(string(body))
-    fmt.Fprintf(w, string(body))
 }
 
 func main() {
@@ -76,7 +72,7 @@ func main() {
             lcaClient, err = lca.NewLCAClient(ctx, "_do_not_find", "")
         }
         case 3: {
-            fmt.Printf("Starting LCAClient in service mode with arguments %s, %s",
+            fmt.Println("Starting LCAClient in service mode with arguments",
                         os.Args[1], os.Args[2])
             lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
         }
