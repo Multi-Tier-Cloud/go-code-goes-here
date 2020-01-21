@@ -17,12 +17,13 @@ type LCAServer struct {
 
 // Stub
 func dockerAlloc(serviceHash string) (string, error) {
-    return "10.11.17.3:8080\n", nil
+    return "10.11.17.3:8080", nil
 }
 
-func respondToAlloc(stream network.Stream) {
-
+func LCAServerHandler(stream network.Stream) {
+    fmt.Println("Got new LCA Server request")
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
+
     str, err := rw.ReadString('\n')
     if err != nil {
         fmt.Println("Error reading from buffer")
@@ -39,7 +40,7 @@ func respondToAlloc(stream network.Stream) {
                 fmt.Println("Error writing to buffer")
                 panic(err)
             }
-            rw.WriteString(result)
+            rw.WriteString(fmt.Sprintf("%s\n", result))
             if err != nil {
                 fmt.Println("Error writing to buffer")
                 panic(err)
@@ -64,16 +65,12 @@ func respondToAlloc(stream network.Stream) {
        }
     }
 
+    fmt.Println("Closing stream")
     stream.Close()
-}
-
-func LCAServerHandler(stream network.Stream) {
-    respondToAlloc(stream)
 }
 
 func NewLCAServer(ctx context.Context) (LCAServer, error) {
     var err error
-
     var node LCAServer
 
     node.Host, err = New(ctx, nil, LCAServerHandler, LCAServerProtocolID, LCAServerRendezvous)

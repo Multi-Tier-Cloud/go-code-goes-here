@@ -27,11 +27,10 @@ var ErrUhOh = errors.New("Communication error with LCA")
 var DefaultBootstrapPeers []multiaddr.Multiaddr
 var DefaultListenAddresses []multiaddr.Multiaddr
 
+var LCAClientProtocolID protocol.ID
+
 var LCAServerProtocolID protocol.ID
 var LCAServerRendezvous string
-
-var LCAClientProtocolID protocol.ID
-var LCAClientRendezvous string
 
 func init() {
     for _, s := range []string{
@@ -54,11 +53,10 @@ func init() {
         DefaultListenAddresses = append(DefaultListenAddresses, ma)
     }
 
+    LCAClientProtocolID = protocol.ID("/lcaclient/1.1.0")
+
     LCAServerProtocolID = protocol.ID("/lcaserver/1.1.0")
     LCAServerRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
-
-    LCAClientProtocolID = protocol.ID("/lcaclient/1.1.0")
-    LCAClientRendezvous = "QmRJQHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
 }
 
 
@@ -103,6 +101,7 @@ func New(ctx context.Context, listenAddresses []string, streamHandler func(strea
 
     node.Ctx = ctx
 
+    fmt.Println("Creating Libp2p node")
     if len(listenAddresses) != 0 {
         node.Host, err = libp2p.New(node.Ctx,
             libp2p.ListenAddrStrings(listenAddresses...),
@@ -119,16 +118,17 @@ func New(ctx context.Context, listenAddresses []string, streamHandler func(strea
         return node, err
     }
 
+    fmt.Println("Setting stream handler")
     if streamHandler != nil {
         node.Host.SetStreamHandler(handlerProtocolID, streamHandler)
     }
 
+    fmt.Println("Creating DHT")
     node.DHT, err = dht.New(node.Ctx, node.Host)
     if err != nil {
         return node, err
     }
 
-    // Bootstrap DHT
     bootstrapPeers := DefaultBootstrapPeers
     var wg sync.WaitGroup
     for _, peerAddr := range bootstrapPeers {
@@ -149,9 +149,10 @@ func New(ctx context.Context, listenAddresses []string, streamHandler func(strea
         return node, err
     }
 
-    // Register new RoutingDiscovery
+    fmt.Println("Creating Routing Discovery")
     node.RoutingDiscovery = discovery.NewRoutingDiscovery(node.DHT)
     discovery.Advertise(node.Ctx, node.RoutingDiscovery, rendezvous)
 
+    fmt.Println("Finished setting up Libp2p node")
     return node, nil
 }

@@ -12,7 +12,6 @@ import (
 
 type LCAClient struct {
     Host           LCAHost
-    ServiceName    string
     ServiceAddress string
 }
 
@@ -63,7 +62,7 @@ func (lca *LCAClient) FindService(serviceHash string) (string, error) {
 
 func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-    _, err := rw.WriteString(fmt.Sprintf("start program %s\n", serviceHash))
+    _, err := rw.WriteString(fmt.Sprintf("start-program %s\n", serviceHash))
     if err != nil {
         fmt.Println("Error writing to buffer")
         panic(err)
@@ -133,6 +132,7 @@ func pingService() error {
 }
 
 func LCAClientHandler(stream network.Stream) {
+    fmt.Println("Got new LCA Client request")
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     err := pingService()
     if err != nil {
@@ -147,7 +147,7 @@ func LCAClientHandler(stream network.Stream) {
            panic(err)
        }
    } else {
-       rw.WriteString("10.11.17.3:8080\n") // replace with some mechanism
+       rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.3")) // replace with some mechanism
        if err != nil {
            fmt.Println("Error writing to buffer")
            panic(err)
@@ -160,14 +160,23 @@ func LCAClientHandler(stream network.Stream) {
    }
 }
 
+// Stub
+func getDNSMapping(serviceName string) (string, error) {
+    return serviceName, nil
+}
+
 func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string) (LCAClient, error) {
     var err error
 
     var node LCAClient
-    node.ServiceName = serviceName
     node.ServiceAddress = serviceAddress
 
-    node.Host, err = New(ctx, nil, LCAClientHandler, LCAClientProtocolID, LCAClientRendezvous)
+    serviceHash, err := getDNSMapping(serviceName)
+    if err != nil {
+        return node, err
+    }
+
+    node.Host, err = New(ctx, nil, LCAClientHandler, LCAClientProtocolID, serviceHash)
     if err != nil {
         return node, err
     }
