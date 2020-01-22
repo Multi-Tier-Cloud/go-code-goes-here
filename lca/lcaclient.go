@@ -16,6 +16,7 @@ type LCAClient struct {
 }
 
 func (lca *LCAClient) FindService(serviceHash string) (string, error) {
+    fmt.Println("Finding providers with rendezvous string:", serviceHash)
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
     if err != nil {
         panic(err)
@@ -23,8 +24,8 @@ func (lca *LCAClient) FindService(serviceHash string) (string, error) {
 
     peers := SortPeers(peerChan, lca.Host)
 
-    found := 0
     for _, p := range peers {
+        fmt.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAClientProtocolID)
         if err != nil {
             continue
@@ -33,28 +34,25 @@ func (lca *LCAClient) FindService(serviceHash string) (string, error) {
             str, err := rw.ReadString('\n')
             if err != nil {
                 fmt.Println("Error reading from buffer")
-                panic(err)
+                return "", err
             }
             str = strings.TrimSuffix(str, "\n")
 
             stream.Close()
 
-            match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
-            if err != nil {
-                return "", err
-            }
+            fmt.Println("Response from peer:", str)
+            //match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
+            //if err != nil {
+            //    fmt.Println("unsuccessful")
+            //    return "", err
+            //}
 
-            if match {
-                return str, nil
-            }
-
-            found = 1
-            break
+            //if match {
+            //    fmt.Println("successful")
+            //    return str, nil
+            //}
+            return str, nil
         }
-    }
-
-    if found != 1 {
-        panic("No reachable LCAs exist.")
     }
 
     return "", ErrUhOh
@@ -65,18 +63,18 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     _, err := rw.WriteString(fmt.Sprintf("start-program %s\n", serviceHash))
     if err != nil {
         fmt.Println("Error writing to buffer")
-        panic(err)
+        return "", err
     }
     err = rw.Flush()
     if err != nil {
         fmt.Println("Error flushing buffer")
-        panic(err)
+        return "", err
     }
 
     str, err := rw.ReadString('\n')
     if err != nil {
         fmt.Println("Error reading from buffer")
-        panic(err)
+        return "", err
     }
     str = strings.TrimSuffix(str, "\n")
 
@@ -97,13 +95,13 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 func (lca *LCAClient) AllocService(serviceHash string) (string, error) {
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAServerRendezvous)
     if err != nil {
-        panic(err)
+        return "", err
     }
 
     peers := SortPeers(peerChan, lca.Host)
 
-    found := 0
     for _, p := range peers {
+        fmt.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAServerProtocolID)
         if err != nil {
             continue
@@ -114,13 +112,7 @@ func (lca *LCAClient) AllocService(serviceHash string) (string, error) {
             }
 
             return result, nil
-            found = 1
-            break
         }
-    }
-
-    if found != 1 {
-        panic("No reachable LCAs exist.")
     }
 
     return "", ErrUhOh
@@ -136,28 +128,28 @@ func LCAClientHandler(stream network.Stream) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     err := pingService()
     if err != nil {
-       rw.WriteString("Error\n")
-       if err != nil {
-           fmt.Println("Error writing to buffer")
-           panic(err)
-       }
-       err = rw.Flush()
-       if err != nil {
-           fmt.Println("Error flushing buffer")
-           panic(err)
-       }
-   } else {
-       rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.3")) // replace with some mechanism
-       if err != nil {
-           fmt.Println("Error writing to buffer")
-           panic(err)
-       }
-       err = rw.Flush()
-       if err != nil {
-           fmt.Println("Error flushing buffer")
-           panic(err)
-       }
-   }
+        rw.WriteString("Error\n")
+        if err != nil {
+            fmt.Println("Error writing to buffer")
+            panic(err)
+        }
+        err = rw.Flush()
+        if err != nil {
+            fmt.Println("Error flushing buffer")
+            panic(err)
+        }
+    } else {
+        rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.3")) // replace with some mechanism
+        if err != nil {
+            fmt.Println("Error writing to buffer")
+            panic(err)
+        }
+        err = rw.Flush()
+        if err != nil {
+            fmt.Println("Error flushing buffer")
+            panic(err)
+        }
+    }
 }
 
 // Stub

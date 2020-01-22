@@ -22,13 +22,13 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Got request:", r.URL.Path[1:])
 
     // 1. separate first section (service name) and rest (arguments)
-    serviceName := r.URL.Path[1:] // TODO: make this support arguments
+    //serviceName := r.URL.Path[1:] // TODO: make this support arguments
     //serviceHash, err := getDNSMapping(serviceName)
-    serviceHash := "hello-world-server"
-    if err != nil {
-        fmt.Fprintf(w, "%s\n", err)
-        panic(err)
-    }
+    serviceHash := "QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk"
+    //if err != nil {
+    //    fmt.Fprintf(w, "%s\n", err)
+    //    panic(err)
+    //}
 
     // 3. if does not exist, use libp2p connection to find/create service
     fmt.Println("Finding best existing service instance")
@@ -44,7 +44,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 
     // 5. run request
     fmt.Println("Running request")
-    resp, err := http.Get(serviceAddress)
+    resp, err := http.Get(fmt.Sprintf("http://%s", serviceAddress))
     if err != nil {
         fmt.Fprintf(w, "%s\n", err)
         panic(err)

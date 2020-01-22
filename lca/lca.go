@@ -35,6 +35,7 @@ var LCAServerRendezvous string
 func init() {
     for _, s := range []string{
         "/ip4/10.11.17.15/tcp/4001/ipfs/QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk",
+        "/ip4/10.11.17.32/tcp/4001/ipfs/12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X",
     } {
         ma, err := multiaddr.NewMultiaddr(s)
         if err != nil {
