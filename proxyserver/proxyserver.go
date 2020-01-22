@@ -22,13 +22,12 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Got request:", r.URL.Path[1:])
 
     // 1. separate first section (service name) and rest (arguments)
-    //serviceName := r.URL.Path[1:] // TODO: make this support arguments
-    //serviceHash, err := getDNSMapping(serviceName)
-    serviceHash := "QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk"
-    //if err != nil {
-    //    fmt.Fprintf(w, "%s\n", err)
-    //    panic(err)
-    //}
+    serviceName := r.URL.Path[1:] // TODO: make this support arguments
+    serviceHash, err := getDNSMapping(serviceName)
+    if err != nil {
+        fmt.Fprintf(w, "%s\n", err)
+        panic(err)
+    }
 
     // 3. if does not exist, use libp2p connection to find/create service
     fmt.Println("Finding best existing service instance")
@@ -59,7 +58,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     fmt.Fprintf(w,"%s\n", string(body))
-    fmt.Println(string(body))
+    fmt.Println("Response from service:", string(body))
 }
 
 func main() {
@@ -75,11 +74,11 @@ func main() {
         case 3: {
             fmt.Println("Starting LCAClient in service mode with arguments",
                         os.Args[1], os.Args[2])
-            //lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
-            lcaClient, err = lca.NewLCAClient(ctx, "hello-world-server", "10.11.17.3")
+            lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
         }
         default: {
-            panic("Usage:$./proxyserver [serviceName ipAddress:port]")
+            fmt.Println("Usage:")
+            fmt.Println("$./proxyserver [serviceName ipAddress:port]")
         }
     }
     if err != nil {

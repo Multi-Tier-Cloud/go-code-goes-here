@@ -16,7 +16,7 @@ type LCAClient struct {
 }
 
 func (lca *LCAClient) FindService(serviceHash string) (string, error) {
-    fmt.Println("Finding providers with rendezvous string:", serviceHash)
+    fmt.Println("Finding providers for:", serviceHash)
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
     if err != nil {
         panic(err)
@@ -40,7 +40,7 @@ func (lca *LCAClient) FindService(serviceHash string) (string, error) {
 
             stream.Close()
 
-            fmt.Println("Response from peer:", str)
+            fmt.Println("Got response from peer:", str)
             //match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
             //if err != nil {
             //    fmt.Println("unsuccessful")
@@ -124,7 +124,7 @@ func pingService() error {
 }
 
 func LCAClientHandler(stream network.Stream) {
-    fmt.Println("Got new LCA Client request")
+    fmt.Println("Got a new LCA Client request")
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     err := pingService()
     if err != nil {
@@ -139,7 +139,7 @@ func LCAClientHandler(stream network.Stream) {
             panic(err)
         }
     } else {
-        rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.3")) // replace with some mechanism
+        rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.7:8080")) // replace with some mechanism
         if err != nil {
             fmt.Println("Error writing to buffer")
             panic(err)

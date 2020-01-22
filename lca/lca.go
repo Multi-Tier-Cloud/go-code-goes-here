@@ -140,7 +140,7 @@ func New(ctx context.Context, listenAddresses []string, streamHandler func(strea
             if err := node.Host.Connect(node.Ctx, *peerinfo); err != nil {
                 fmt.Println(err)
             } else {
-                fmt.Println("Connection established with bootstrap node:", *peerinfo)
+                fmt.Println("Connected to bootstrap node:", *peerinfo)
             }
         }()
     }
