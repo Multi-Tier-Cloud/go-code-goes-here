@@ -154,6 +154,6 @@ func New(ctx context.Context, listenAddresses []string, streamHandler func(strea
     node.RoutingDiscovery = discovery.NewRoutingDiscovery(node.DHT)
     discovery.Advertise(node.Ctx, node.RoutingDiscovery, rendezvous)
 
-    fmt.Println("Finished setting up Libp2p node")
+    fmt.Println("Finished setting up Libp2p node with pid", node.Host.ID())
     return node, nil
 }
