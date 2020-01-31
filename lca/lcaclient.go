@@ -12,7 +12,6 @@ import (
 
 type LCAClient struct {
     Host           LCAHost
-    ServiceAddress string
 }
 
 func (lca *LCAClient) FindService(serviceHash string) (string, error) {
@@ -123,31 +122,33 @@ func pingService() error {
     return nil
 }
 
-func LCAClientHandler(stream network.Stream) {
-    fmt.Println("Got a new LCA Client request")
-    rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-    err := pingService()
-    if err != nil {
-        rw.WriteString("Error\n")
+func NewLCAClientHandler(address string) func(network.Stream) {
+    return func(stream network.Stream) {
+        fmt.Println("Got a new LCA Client request")
+        rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
+        err := pingService()
         if err != nil {
-            fmt.Println("Error writing to buffer")
-            panic(err)
-        }
-        err = rw.Flush()
-        if err != nil {
-            fmt.Println("Error flushing buffer")
-            panic(err)
-        }
-    } else {
-        rw.WriteString(fmt.Sprintf("%s\n", "10.11.17.7:8080")) // replace with some mechanism
-        if err != nil {
-            fmt.Println("Error writing to buffer")
-            panic(err)
-        }
-        err = rw.Flush()
-        if err != nil {
-            fmt.Println("Error flushing buffer")
-            panic(err)
+            rw.WriteString("Error\n")
+            if err != nil {
+                fmt.Println("Error writing to buffer")
+                panic(err)
+            }
+            err = rw.Flush()
+            if err != nil {
+                fmt.Println("Error flushing buffer")
+                panic(err)
+            }
+        } else {
+            rw.WriteString(fmt.Sprintf("%s\n", address)) // replace with some mechanism
+            if err != nil {
+                fmt.Println("Error writing to buffer")
+                panic(err)
+            }
+            err = rw.Flush()
+            if err != nil {
+                fmt.Println("Error flushing buffer")
+                panic(err)
+            }
         }
     }
 }
@@ -161,14 +162,13 @@ func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string
     var err error
 
     var node LCAClient
-    node.ServiceAddress = serviceAddress
 
     serviceHash, err := getDNSMapping(serviceName)
     if err != nil {
         return node, err
     }
 
-    node.Host, err = New(ctx, nil, LCAClientHandler, LCAClientProtocolID, serviceHash)
+    node.Host, err = New(ctx, nil, NewLCAClientHandler(serviceAddress), LCAClientProtocolID, serviceHash)
     if err != nil {
         return node, err
     }
