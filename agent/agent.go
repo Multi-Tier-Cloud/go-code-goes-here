@@ -12,7 +12,7 @@ func main () {
 
     // Spawn LCA Server
     fmt.Println("Spawning LCA Server")
-    _, err := lca.NewLCAServer(ctx)
+    _, err := lca.NewLCAAgent(ctx)
     if err != nil {
         panic(err)
     }

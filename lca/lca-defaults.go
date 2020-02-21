@@ -13,12 +13,13 @@ import (
 
 var ErrUhOh = errors.New("Communication error with LCA")
 
+
 var DefaultListenAddrs []multiaddr.Multiaddr
 
 var LCAClientProtocolID protocol.ID
 
-var LCAServerProtocolID protocol.ID
-var LCAServerRendezvous string
+var LCAAgentProtocolID protocol.ID
+var LCAAgentRendezvous string
 
 
 func init() {
@@ -30,9 +31,9 @@ func init() {
         panic(err)
     }
 
-    LCAClientProtocolID = protocol.ID("/lcaclient/1.1.0")
+    LCAClientProtocolID = protocol.ID("/LCAClient/1.0")
 
-    LCAServerProtocolID = protocol.ID("/lcaserver/1.1.0")
-    LCAServerRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
+    LCAAgentProtocolID = protocol.ID("/LCAAgent/1.0")
+    LCAAgentRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
 }
 

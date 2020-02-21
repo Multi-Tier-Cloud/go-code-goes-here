@@ -7,20 +7,22 @@ import (
 	"net"
     "os"
     "regexp"
+    "strconv"
     "strings"
 
     "github.com/libp2p/go-libp2p-core/network"
+    "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
+    //"github.com/Multi-Tier-Cloud/common/util"
 )
 
 
-type LCAServer struct {
+type LCAAgent struct {
     Host p2pnode.Node
 }
 
-// Get preferred outbound ip of this machine
-func GetIPAddress() (string, error) {
+func getIPAddress() (string, error) {
     conn, err := net.Dial("udp", "8.8.8.8:80")
     if err != nil {
         return "", err
@@ -36,8 +38,8 @@ func GetIPAddress() (string, error) {
 func dockerAlloc(serviceHash string) (string, error) {
     attr := os.ProcAttr{}
     process, err := os.StartProcess(
-        "../../demos/helloworld/helloworldserver/helloworldserver",
-        []string{"helloworldserver"},
+        "../../demos/helloworld/helloworldAgent/helloworldAgent",
+        []string{"helloworldAgent"},
         &attr,
     )
     if err != nil {
@@ -48,17 +50,19 @@ func dockerAlloc(serviceHash string) (string, error) {
         return "", err
     }
 
-	ipAddr, err := GetIPAddress()
+	//ipAddr, err := util.GetIPAddress()
+	ipAddr, err := getIPAddress()
     if err != nil {
         return "", err
     }
-	port := "8080"
+    // port, err := util.GetFreePort()
+	port := strconv.Itoa(8080)
 
     return ipAddr + ":" + port, nil
 }
 
-func LCAServerHandler(stream network.Stream) {
-    fmt.Println("Got new LCA Server request")
+func LCAAgentHandler(stream network.Stream) {
+    fmt.Println("Got new LCA Agent request")
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
 
     str, err := rw.ReadString('\n')
@@ -110,14 +114,14 @@ func LCAServerHandler(stream network.Stream) {
     stream.Close()
 }
 
-func NewLCAServer(ctx context.Context) (LCAServer, error) {
+func NewLCAAgent(ctx context.Context) (LCAAgent, error) {
     var err error
-    var node LCAServer
+    var node LCAAgent
 
     config := p2pnode.NewConfig()
-    config.StreamHandler = LCAServerHandler
-    config.HandlerProtocolID = LCAServerProtocolID
-    config.Rendezvous = LCAServerRendezvous
+    config.StreamHandlers = []network.StreamHandler{LCAAgentHandler}
+    config.HandlerProtocolIDs = []protocol.ID{LCAAgentProtocolID}
+    config.Rendezvous = []string{LCAAgentRendezvous}
     node.Host, err = p2pnode.NewNode(ctx, config)
     if err != nil {
         return node, err

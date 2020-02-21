@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/libp2p/go-libp2p-core/network"
+    "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
@@ -95,7 +96,7 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 }
 
 func (lca *LCAClient) AllocService(serviceHash string) (string, error) {
-    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAServerRendezvous)
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAgentRendezvous)
     if err != nil {
         return "", err
     }
@@ -104,7 +105,7 @@ func (lca *LCAClient) AllocService(serviceHash string) (string, error) {
 
     for _, p := range peers {
         fmt.Println("Attempting to contact peer with pid:", p.ID)
-        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAServerProtocolID)
+        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAAgentProtocolID)
         if err != nil {
             continue
         } else {
@@ -172,9 +173,9 @@ func NewLCAClient(ctx context.Context, serviceName string, serviceAddress string
     }
 
     config := p2pnode.NewConfig()
-    config.StreamHandler = NewLCAClientHandler(serviceAddress)
-    config.HandlerProtocolID = LCAClientProtocolID
-    config.Rendezvous = serviceHash
+    config.StreamHandlers = []network.StreamHandler{NewLCAClientHandler(serviceAddress)}
+    config.HandlerProtocolIDs = []protocol.ID{LCAClientProtocolID}
+    config.Rendezvous = []string{serviceHash}
     node.Host, err = p2pnode.NewNode(ctx, config)
     if err != nil {
         return node, err
