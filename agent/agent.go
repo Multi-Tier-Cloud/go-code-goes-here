@@ -10,8 +10,8 @@ import (
 func main () {
     ctx := context.Background()
 
-    // Spawn LCA Server
-    fmt.Println("Spawning LCA Server")
+    // Spawn LCA Agent
+    fmt.Println("Spawning LCA Agent")
     _, err := lca.NewLCAAgent(ctx)
     if err != nil {
         panic(err)

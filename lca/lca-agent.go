@@ -4,7 +4,6 @@ import (
     "bufio"
     "context"
     "fmt"
-	"net"
     "os"
     "regexp"
     "strconv"
@@ -14,7 +13,7 @@ import (
     "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
-    //"github.com/Multi-Tier-Cloud/common/util"
+    "github.com/Multi-Tier-Cloud/common/util"
 )
 
 
@@ -22,23 +21,10 @@ type LCAAgent struct {
     Host p2pnode.Node
 }
 
-func getIPAddress() (string, error) {
-    conn, err := net.Dial("udp", "8.8.8.8:80")
-    if err != nil {
-        return "", err
-    }
-    defer conn.Close()
-
-    localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-    return localAddr.IP.String(), nil
-}
-
-// Stub
 func dockerAlloc(serviceHash string) (string, error) {
     attr := os.ProcAttr{}
     process, err := os.StartProcess(
-        "../../demos/helloworld/helloworldAgent/helloworldAgent",
+        "../../demos/helloworld/helloworldserver/helloworldserver",
         []string{"helloworldAgent"},
         &attr,
     )
@@ -51,7 +37,7 @@ func dockerAlloc(serviceHash string) (string, error) {
     }
 
 	//ipAddr, err := util.GetIPAddress()
-	ipAddr, err := getIPAddress()
+	ipAddr, err := util.GetIPAddress()
     if err != nil {
         return "", err
     }
