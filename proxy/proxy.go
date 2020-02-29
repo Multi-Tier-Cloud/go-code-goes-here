@@ -2,7 +2,6 @@ package main
 
 import (
     "context"
-    "errors"
     "fmt"
     "io/ioutil"
     "log"
@@ -78,20 +77,23 @@ func main() {
 
     // Setup LCA Client
     ctx := context.Background()
-    // TODO: change this to use flags
-    if len(os.Args) == 3 {
-        if os.Args[1] == "@" {
-            fmt.Println("Starting LCAClient in anonymous mode")
-            lcaClient, err = lca.NewLCAClient(ctx, "", "")
-        } else {
-            fmt.Println("Starting LCAClient in service mode with arguments",
-                        os.Args[1], os.Args[2])
-            lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
-        }
+
+    if len(os.Args) == 1 {
+        fmt.Println("Starting LCAClient in anonymous mode")
+        lcaClient, err = lca.NewLCAClient(ctx, "", "")
+    } else if len(os.Args) == 3 {
+        fmt.Println("Starting LCAClient in service mode with arguments",
+                    os.Args[1], os.Args[2])
+        lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
     } else {
         fmt.Println("Usage:")
-        fmt.Println("$./proxyserver [serviceName ipAddress:port]")
-        err = errors.New("Improper usage")
+        fmt.Println("$./proxyserver [service address]")
+        fmt.Println("    service: name of the service for proxy to bind to")
+        fmt.Println("    address: IP:PORT of the service for proxy to bind to")
+        fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
+        fmt.Println("\"anonymous mode\" allows a client to access the network without")
+        fmt.Println("having to register and advertise itself in the network")
+        os.Exit(1)
     }
     if err != nil {
         panic(err)
