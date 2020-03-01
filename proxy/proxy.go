@@ -14,19 +14,21 @@ import (
 
 )
 
-var lcaClient lca.LCAClient
+// Global LCA Manager instance to handle peer search and allocation
+var manager lca.LCAManager
 
+// Handles the "proxying" part of proxy
 func requestHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Got request:", r.URL.Path[1:])
 
-    // 1. separate first section (service name) and rest (arguments)
+    // 1. Find service information and arguments from URL
     tokens := strings.SplitN(r.URL.Path, "/", 3)
     fmt.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
     serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
-        lcaClient.Host.Ctx, lcaClient.Host.Host,
-        lcaClient.Host.RoutingDiscovery, serviceName,
+        manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, serviceName,
     )
     if err != nil {
         fmt.Fprintf(w, "%s\n", err)
@@ -38,19 +40,23 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         arguments = tokens[2]
     }
 
-    // 3. if does not exist, use libp2p connection to find/create service
+    // TODO: 2. Search for cached instances
+
+    // If does not exist, use libp2p connection to find/create service
     fmt.Println("Finding best existing service instance")
-    serviceAddress, err := lcaClient.FindService(serviceHash)
+    serviceAddress, err := manager.FindService(serviceHash)
     if err != nil {
         fmt.Println("Could not find, creating new service instance")
-        serviceAddress, err = lcaClient.AllocService(dockerHash)
+        serviceAddress, err = manager.AllocService(dockerHash)
         if err != nil {
             fmt.Println("No services able to be found or created")
             panic(err)
         }
     }
 
-    // 5. run request
+    // TODO: Cache peer information
+
+    // Run request
     request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
     fmt.Println("Running request:", request)
     resp, err := http.Get(request)
@@ -60,7 +66,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
     defer resp.Body.Close()
 
-    // 7. return result
+    // Return result
     fmt.Println("Sending response back to requester")
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
@@ -75,16 +81,17 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
     var err error
 
-    // Setup LCA Client
+    // Setup LCA Manager
     ctx := context.Background()
 
+    // Parse command line arguments
     if len(os.Args) == 1 {
-        fmt.Println("Starting LCAClient in anonymous mode")
-        lcaClient, err = lca.NewLCAClient(ctx, "", "")
+        fmt.Println("Starting LCA Manager in anonymous mode")
+        manager, err = lca.NewLCAManager(ctx, "", "")
     } else if len(os.Args) == 3 {
-        fmt.Println("Starting LCAClient in service mode with arguments",
+        fmt.Println("Starting LCA Manager in service mode with arguments",
                     os.Args[1], os.Args[2])
-        lcaClient, err = lca.NewLCAClient(ctx, os.Args[1], os.Args[2])
+        manager, err = lca.NewLCAManager(ctx, os.Args[1], os.Args[2])
     } else {
         fmt.Println("Usage:")
         fmt.Println("$./proxyserver [service address]")

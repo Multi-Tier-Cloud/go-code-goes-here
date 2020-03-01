@@ -11,17 +11,21 @@ import (
 )
 
 
+// Generic error object
+// TODO: replace this with more specific errors
 var ErrUhOh = errors.New("Communication error with LCA")
 
 
+// Useful defaults
 var DefaultListenAddrs []multiaddr.Multiaddr
 
-var LCAClientProtocolID protocol.ID
+var LCAManagerProtocolID protocol.ID
 
-var LCAAgentProtocolID protocol.ID
-var LCAAgentRendezvous string
+var LCAAllocatorProtocolID protocol.ID
+var LCAAllocatorRendezvous string
 
 
+// Initialize defaults
 func init() {
     var err error
     DefaultListenAddrs, err = p2pnode.StringsToMultiaddrs([]string{
@@ -31,9 +35,9 @@ func init() {
         panic(err)
     }
 
-    LCAClientProtocolID = protocol.ID("/LCAClient/1.0")
+    LCAManagerProtocolID = protocol.ID("/LCAManager/1.0")
 
-    LCAAgentProtocolID = protocol.ID("/LCAAgent/1.0")
-    LCAAgentRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
+    LCAAllocatorProtocolID = protocol.ID("/LCAAllocator/1.0")
+    LCAAllocatorRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
 }
 
