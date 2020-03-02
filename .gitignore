@@ -1,3 +1,6 @@
 # ignore binaries
-agent/agent
+allocator/allocator
 proxy/proxy
+
+# ignore vim swapfiles
+**/*.swp
