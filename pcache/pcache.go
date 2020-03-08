@@ -14,7 +14,7 @@ import (
 // New type with PeerInfo and RCount
 // R stands for Reliability and counts how many times
 // a peer has been reliable
-type RPeerInfo {
+type RPeerInfo struct {
     RCount uint
     Info   p2putil.PeerInfo
 }
@@ -30,7 +30,7 @@ type PeerCache struct {
 // Constructor for PeerCache
 // Takes performance requirements (reqPerf) as argument
 func NewPeerCache(reqPerf p2putil.PerfInd) PeerCache {
-    peerCache PeerCache
+    var peerCache PeerCache
     peerCache.ReqPerf = reqPerf
     // This is hardcoded for now as there really isn't
     // need for any more levels than three
@@ -38,46 +38,54 @@ func NewPeerCache(reqPerf p2putil.PerfInd) PeerCache {
     // Level 1: performant but not reliable
     // Level 2: not performant and not reliable
     peerCache.NLevels = 3
-    for i := range 3 {
-        peerCache.Levels = append(Levels, []RPeerInfo{})
+    peerCache.Levels = [][]RPeerInfo{}
+    for i := uint(0); i < peerCache.NLevels; i++ {
+        peerCache.Levels = append(peerCache.Levels, []RPeerInfo{})
     }
     return peerCache
 }
 
 // Gets a reliable peer from cache
-func GetPeer(cache *PeerCache) (PeerInfo, error) {
+func GetPeer(cache *PeerCache) (p2putil.PeerInfo, error) {
     // Search levels starting from level 0 (most reliable)
     // omitting the last level (non-performant peers due for removal)
-    for l := range (cache.NLevels - 1) {
-        for p := range cache.Levels[l] {
+    for l := uint(0); l < (cache.NLevels-1); l++ {
+        for _, p := range cache.Levels[l] {
             // Return the first performant peer
             // TODO: design a fairness policy
-            return p.PeerInfo, nil
+            return p.Info, nil
         }
     }
-    return PeerInfo{}, errors.NewError("No suitable peer found in cache")
+    return p2putil.PeerInfo{}, errors.New("No suitable peer found in cache")
+}
+
+// Helper function "remove peer from slice"
+func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
+    s[len(s)-1], s[i] = s[i], s[len(s)-1]
+    return s[:len(s)-1]
 }
 
 // Helper function that updates RCounts and changes peer reliability levels in cache
 func updateCache(node *p2pnode.Node, cache *PeerCache) {
+    nLevels := cache.NLevels
     // First pass: update RCounts
-    for l := range cache.NLevels {
-        for p := range cache.Levels[l] {
+    for l := uint(0); l < nLevels; l++ {
+        for _, p := range cache.Levels[l] {
             // Ping peers to check performance
             // TODO: set timeout based on performance requirement
-            responseChan := ping.Ping(node.Ctx, node.Host, p.PeerInfo.ID)
+            responseChan := ping.Ping(node.Ctx, node.Host, p.Info.ID)
             result := <-responseChan
-            // If peer isn't up or no set RCount to 0
-            perf = PerfInd{RTT: result.RTT}
-            if len(p.Addrs) == 0 || result.RTT == 0 {
+            // If peer isn't up set RCount to 0
+            perf := p2putil.PerfInd{RTT: result.RTT}
+            if result.RTT == 0 {
                 p.RCount = 0
             // If peer is up and doesn't meet requirements decrement RCount by 10
-            } else if p2putil.PerfCompare(cache.ReqPerf, perf) {
+            } else if p2putil.PerfIndCompare(cache.ReqPerf, perf) {
                 p.Info.Perf = perf
                 if p.RCount < 10 {
                     p.RCount = 0
                 } else {
-                    p.Rcount -= 10
+                    p.RCount -= 10
                 }
             // If it does meet requirements then increment RCount up to 100
             } else {
@@ -88,21 +96,35 @@ func updateCache(node *p2pnode.Node, cache *PeerCache) {
             }
         }
     }
-    // Second pass: move peers in levels starting from bottom up
-    // Remove all peers in level 0
+    // Second pass: move peers into appropriate new levels
+    // Remove all peers in last level (unreliable peers)
     // TODO: check if this implementation causes memory leaks
-    cache.Levels[0] = []RPeerInfo{}
-    for i, p := range cache.Levels[cache.NLevels - 1] {
-        if p.RCount < 100 {
-            // TODO: FIX
-            cache.NLevels[l-1]
+    cache.Levels[nLevels-1] = []RPeerInfo{}
+    // Move peers in top level down if they become unreliable
+    for i, p := range cache.Levels[0] {
+        if p.RCount < 90 {
+            // Set RCount to 50 when dropping to penalize inconsistency
+            p.RCount = 50
+            cache.Levels[1] = append(cache.Levels[1], p)
+            cache.Levels[0] = rpfs(cache.Levels[0], uint(i))
+        }
     }
     // Move peers in middle level(s) to appropriate new levels
-    for l := 1; l < cache.NLevels; l++ {
-        for p := range cache.Levels[l] {
-            if p.RCount < 100 {
-                cache.NLevels[l - 1] = append(cache.NLevels[l - 1], p)
-                cache.Levels[l][] = nil
+    for l := uint(1); l < (cache.NLevels-1); l++ {
+        for i, p := range cache.Levels[l] {
+            if p.RCount > 90 {
+                // Do not change RCount so consistently reliable peers
+                // get promoted quickly
+                cache.Levels[l-1] = append(cache.Levels[l-1], p)
+                cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+            } else if p.RCount < 10 {
+                // Set RCount to 50 when dropping to give a slight
+                // buffer so nodes do not chain drop to the last level
+                // while it is recovering
+                p.RCount = 50
+                cache.Levels[l+1] = append(cache.Levels[l+1], p)
+                cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+            }
         }
     }
 }
@@ -120,14 +142,19 @@ func UpdateCache(node *p2pnode.Node, addpeer <-chan peer.ID, addresult chan<- er
             responseChan := ping.Ping(node.Ctx, node.Host, id)
             result := <-responseChan
             // If peer isn't up send back error
-            if len(p.Addrs) == 0 || result.RTT == 0 {
-                addresult <- errors.NewError("Attempted to add dead peer")
+            // TODO: check if this is the correct error condition
+            if result.RTT == 0 {
+                addresult <- errors.New("Attempted to add dead peer")
                 break
             }
-            // Add peer to cache in lowest level
-            cache.L2 = append(cache.Levels[cache.NLevels - 1],
-                RPeerInfo{RCount: 0, Peer: p2putil.PeerInfo{
-                    Perf: p2putil.PerfInd{RTT: result.RTT}, ID: id})
+            // Add peer to cache in second lowest level
+            cache.Levels[cache.NLevels-2] = append(cache.Levels[cache.NLevels-2],
+                RPeerInfo{
+                    RCount: 50, Info: p2putil.PeerInfo{
+                        Perf: p2putil.PerfInd{RTT: result.RTT}, ID: id,
+                    },
+                },
+            )
             // Send back nil to indicate no error
             addresult <- nil
         default:
