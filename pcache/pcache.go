@@ -15,8 +15,10 @@ import (
 // R stands for Reliability and counts how many times
 // a peer has been reliable
 type RPeerInfo struct {
-    RCount uint
-    Info   p2putil.PeerInfo
+    RCount  uint
+    Info    p2putil.PeerInfo
+    Hash    string
+    Address string
 }
 
 // PeerCache holds the performance requirements
@@ -46,17 +48,19 @@ func NewPeerCache(reqPerf p2putil.PerfInd) PeerCache {
 }
 
 // Gets a reliable peer from cache
-func GetPeer(cache *PeerCache) (p2putil.PeerInfo, error) {
+func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
     // Search levels starting from level 0 (most reliable)
     // omitting the last level (non-performant peers due for removal)
     for l := uint(0); l < (cache.NLevels-1); l++ {
         for _, p := range cache.Levels[l] {
             // Return the first performant peer
             // TODO: design a fairness policy
-            return p.Info, nil
+            if p.Hash == hash {
+                return p.Info, p.Address, nil
+            }
         }
     }
-    return p2putil.PeerInfo{}, errors.New("No suitable peer found in cache")
+    return p2putil.PeerInfo{}, "", errors.New("No suitable peer found in cache")
 }
 
 // Helper function "remove peer from slice"
@@ -129,34 +133,43 @@ func updateCache(node *p2pnode.Node, cache *PeerCache) {
     }
 }
 
+// Request struct for request addition of peer in UpdateCache
+type PeerRequest struct {
+    ID      peer.ID
+    Hash    string
+    Address string
+}
+
 // Takes care of adding new peers and updating cache levels
 // UpdateCache must be run in a separate goroutine
-func UpdateCache(node *p2pnode.Node, addpeer <-chan peer.ID, addresult chan<- error, cache *PeerCache) {
+// This function no longer reports errors as there's no good way to
+// allow the calling function which itself is multithreaded to find
+// the error message corresponding to its request
+// The requesting function must loop on add and get until get succeeds
+// See cache section of service-manager/proxy/proxy.go in requestHandler for example
+func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCache) {
     // Start a timer to track when to run update
     timer := time.NewTimer(1 * time.Second)
     for {
         select {
         // Check for new peer add requests
-        case id := <-addpeer:
+        case p := <-addpeer:
             // Ping peer to check if it's up and for performance
-            responseChan := ping.Ping(node.Ctx, node.Host, id)
+            responseChan := ping.Ping(node.Ctx, node.Host, p.ID)
             result := <-responseChan
             // If peer isn't up send back error
             // TODO: check if this is the correct error condition
             if result.RTT == 0 {
-                addresult <- errors.New("Attempted to add dead peer")
                 break
             }
             // Add peer to cache in second lowest level
             cache.Levels[cache.NLevels-2] = append(cache.Levels[cache.NLevels-2],
                 RPeerInfo{
                     RCount: 50, Info: p2putil.PeerInfo{
-                        Perf: p2putil.PerfInd{RTT: result.RTT}, ID: id,
-                    },
+                        Perf: p2putil.PerfInd{RTT: result.RTT}, ID: p.ID,
+                    }, Hash: p.Hash,
                 },
             )
-            // Send back nil to indicate no error
-            addresult <- nil
         default:
             select {
             // If timer has fired, update cache

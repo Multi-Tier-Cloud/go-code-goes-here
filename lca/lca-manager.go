@@ -8,6 +8,7 @@ import (
     "strings"
 
     "github.com/libp2p/go-libp2p-core/network"
+    "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
@@ -24,7 +25,7 @@ type LCAManager struct {
 }
 
 // Finds the best service instance by pinging other LCA Manager instances
-func (lca *LCAManager) FindService(serviceHash string) (string, error) {
+func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) {
     fmt.Println("Finding providers for:", serviceHash)
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
     if err != nil {
@@ -43,7 +44,7 @@ func (lca *LCAManager) FindService(serviceHash string) (string, error) {
             str, err := rw.ReadString('\n')
             if err != nil {
                 fmt.Println("Error reading from buffer")
-                return "", err
+                return peer.ID(""), "", err
             }
             str = strings.TrimSuffix(str, "\n")
 
@@ -60,11 +61,11 @@ func (lca *LCAManager) FindService(serviceHash string) (string, error) {
             //    fmt.Println("successful")
             //    return str, nil
             //}
-            return str, nil
+            return p.ID, str, nil
         }
     }
 
-    return "", ErrUhOh
+    return peer.ID(""), "", ErrUhOh
 }
 
 // Helper function to AllocService that handles the communication with LCA Allocator
@@ -105,11 +106,11 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 }
 
 // Requests allocation on LCA Allocators with good network performance
-func (lca *LCAManager) AllocService(serviceHash string) (string, error) {
+func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, error) {
     // Look for Allocators
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAllocatorRendezvous)
     if err != nil {
-        return "", err
+        return peer.ID(""), "", err
     }
 
     // Sort Allocators based on performance
@@ -127,11 +128,11 @@ func (lca *LCAManager) AllocService(serviceHash string) (string, error) {
                 continue
             }
 
-            return result, nil
+            return p.ID, result, nil
         }
     }
 
-    return "", ErrUhOh
+    return peer.ID(""), "", ErrUhOh
 }
 
 // Stub
