@@ -10,9 +10,9 @@ import (
 func main () {
     ctx := context.Background()
 
-    // Spawn LCA Server
-    fmt.Println("Spawning LCA Server")
-    _, err := lca.NewLCAServer(ctx)
+    // Spawn LCA Allocator
+    fmt.Println("Spawning LCA Allocator")
+    _, err := lca.NewLCAAllocator(ctx)
     if err != nil {
         panic(err)
     }

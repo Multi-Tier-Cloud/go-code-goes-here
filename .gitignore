@@ -1,3 +1,6 @@
 # ignore binaries
-lcaserver/lcaserver
-proxyserver/proxyserver
+allocator/allocator
+proxy/proxy
+
+# ignore vim swapfiles
+**/*.swp
