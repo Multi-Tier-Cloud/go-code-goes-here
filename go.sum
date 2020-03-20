@@ -8,6 +8,8 @@ github.com/Kubuxu/go-os-helper v0.0.1/go.mod h1:N8B+I7vPCT80IcP58r50u4+gEEcsZETF
 github.com/Multi-Tier-Cloud/common v0.0.0-20200221061654-36f119e42422/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
 github.com/Multi-Tier-Cloud/common v0.0.0-20200308234200-68a1842c0e83 h1:b//CygTeKzO6m9p+CMVY5rjmG/dl+BVZKLYvUdvAS54=
 github.com/Multi-Tier-Cloud/common v0.0.0-20200308234200-68a1842c0e83/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
+github.com/Multi-Tier-Cloud/common v0.0.0-20200309021533-0128c0bbff6d h1:5GGbz1sP9CKSuRG5oN565hQIuxhg1u3xgqDT2xkUqQc=
+github.com/Multi-Tier-Cloud/common v0.0.0-20200309021533-0128c0bbff6d/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
 github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200221205044-c93cbeefb8f9 h1:QWu9uR3IKCjMdjHDxZCyy9mvAEbAqR/TAnVA7UHibRs=
 github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200221205044-c93cbeefb8f9/go.mod h1:1Z31nw/RuqYEbq/RaYHlpgl1vSpJPwxzmTBw/UxZKTY=
 github.com/Stebalien/go-bitfield v0.0.0-20180330043415-076a62f9ce6e/go.mod h1:3oM7gXIttpYDAJXpVNnSCiUMYBLIZ6cb1t+Ip982MRo=

@@ -2,6 +2,7 @@ package pcache
 
 import (
     "errors"
+    "fmt"
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -56,6 +57,7 @@ func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
             // Return the first performant peer
             // TODO: design a fairness policy
             if p.Hash == hash {
+                fmt.Println("Getting peer with ID", p.Info.ID, "from pcache")
                 return p.Info, p.Address, nil
             }
         }
@@ -149,11 +151,14 @@ type PeerRequest struct {
 // See cache section of service-manager/proxy/proxy.go in requestHandler for example
 func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCache) {
     // Start a timer to track when to run update
-    timer := time.NewTimer(1 * time.Second)
+    fmt.Println("Launching cache update function")
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
     for {
         select {
         // Check for new peer add requests
         case p := <-addpeer:
+            fmt.Println("Adding new peer with ID", p.ID)
             // Ping peer to check if it's up and for performance
             responseChan := ping.Ping(node.Ctx, node.Host, p.ID)
             result := <-responseChan
@@ -173,8 +178,11 @@ func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCach
         default:
             select {
             // If timer has fired, update cache
-            case <-timer.C:
+            case <-ticker.C:
+                fmt.Println("Timer fired")
+                fmt.Println("Formatting cache...")
                 updateCache(node, cache)
+                fmt.Println("Format cache done")
             // If the timer hasn't fired yet
             default:
                 // Do nothing
