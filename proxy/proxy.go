@@ -34,6 +34,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
+    fmt.Println("Looking for service with name", serviceName, "in hash-lookup")
     serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
         manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, serviceName,
