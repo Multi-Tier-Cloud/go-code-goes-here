@@ -156,7 +156,7 @@ func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCach
     defer ticker.Stop()
     for {
         select {
-        // Check for new peer add requests
+        // Check with precedence for new peer add requests
         case p := <-addpeer:
             fmt.Println("Adding new peer with ID", p.ID)
             // Ping peer to check if it's up and for performance
@@ -172,17 +172,16 @@ func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCach
                 RPeerInfo{
                     RCount: 50, Info: p2putil.PeerInfo{
                         Perf: p2putil.PerfInd{RTT: result.RTT}, ID: p.ID,
-                    }, Hash: p.Hash,
+                    }, Hash: p.Hash, Address: p.Address,
                 },
             )
+        // TODO: create fairness policy
+        // Are datastructures in go automatically thread safe?
         default:
             select {
             // If timer has fired, update cache
             case <-ticker.C:
-                fmt.Println("Timer fired")
-                fmt.Println("Formatting cache...")
                 updateCache(node, cache)
-                fmt.Println("Format cache done")
             // If the timer hasn't fired yet
             default:
                 // Do nothing

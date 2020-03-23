@@ -14,6 +14,8 @@ github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200221205044-c93cbeefb8f9 h1:QW
 github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200221205044-c93cbeefb8f9/go.mod h1:1Z31nw/RuqYEbq/RaYHlpgl1vSpJPwxzmTBw/UxZKTY=
 github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200313220249-e5b3e14dd453 h1:TOSGSiCJ6jHqEsoIiqgPGeaMquiIVNfsyPL8Y1vgi6k=
 github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200313220249-e5b3e14dd453/go.mod h1:OY45WpeCEDA7MZtNEA0urcutmCA4ZwonH6aXpNkiHTA=
+github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200322054456-6ebd2eaf054a h1:pk2tjpvpVi4EvO5+6K5dtuHXjy/XMGWCbnq7EPg4APs=
+github.com/Multi-Tier-Cloud/hash-lookup v0.0.0-20200322054456-6ebd2eaf054a/go.mod h1:6lyb4mvH/WgjiEKzDS/CkBYEUE53T3k9zBdhco++R2c=
 github.com/Stebalien/go-bitfield v0.0.0-20180330043415-076a62f9ce6e/go.mod h1:3oM7gXIttpYDAJXpVNnSCiUMYBLIZ6cb1t+Ip982MRo=
 github.com/Stebalien/go-bitfield v0.0.1/go.mod h1:GNjFpasyUVkHMsfEOk8EFLJ9syQ6SI+XWrX9Wf2XH0s=
 github.com/aead/siphash v1.0.1/go.mod h1:Nywa3cDsYNNK3gaciGTWPwHt0wlpNV15vwmswBAUSII=
@@ -732,6 +734,7 @@ golang.org/x/net v0.0.0-20190613194153-d28f0bde5980/go.mod h1:z5CRVTTTmAJ677TzLL
 golang.org/x/net v0.0.0-20190620200207-3b0461eec859 h1:R/3boaszxrf1GEUWTVDzSKVwLmSJpwZ1yqXm8j0v2QI=
 golang.org/x/net v0.0.0-20190620200207-3b0461eec859/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
 golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
+golang.org/x/net v0.0.0-20191002035440-2ec189313ef0 h1:2mqDk8w/o6UmeUCu5Qiq2y7iMf6anbx+YA8d1JFoFrs=
 golang.org/x/net v0.0.0-20191002035440-2ec189313ef0/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
 golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
 golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=

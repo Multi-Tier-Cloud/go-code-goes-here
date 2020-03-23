@@ -9,8 +9,6 @@ import (
     "os"
     "strings"
 
-    _ "github.com/libp2p/go-libp2p-core/peer"
-
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
@@ -50,28 +48,25 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     serviceAddress := ""
-    success := false
-    for success {
-        // 2. Search for cached instances
-        // TODO: allow search by service name
-        _, serviceAddress, err = cache.GetPeer(serviceHash)
+    // 2. Search for cached instances
+    // TODO: allow search by service name
+    _, serviceAddress, err = cache.GetPeer(serviceHash)
+    if err != nil {
+        // If does not exist, use libp2p connection to find/create service
+        fmt.Println("Finding best existing service instance")
+        id, serviceAddress, err := manager.FindService(serviceHash)
         if err != nil {
-            // If does not exist, use libp2p connection to find/create service
-            fmt.Println("Finding best existing service instance")
-            id, serviceAddress, err := manager.FindService(serviceHash)
+            fmt.Println("Could not find, creating new service instance")
+            id, serviceAddress, err = manager.AllocService(dockerHash)
             if err != nil {
-                fmt.Println("Could not find, creating new service instance")
-                id, serviceAddress, err = manager.AllocService(dockerHash)
-                if err != nil {
-                    fmt.Println("No services able to be found or created")
-                    panic(err)
-                }
+                fmt.Println("No services able to be found or created")
+                fmt.Fprintf(w, "%s\n", err)
+                panic(err)
             }
-
-            // Cache peer information and loop again
-            rchan <- pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress}
-            continue
         }
+
+        // Cache peer information and loop again
+        rchan <- pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress}
     }
 
     // Run request
@@ -132,7 +127,9 @@ func main() {
     reqPerf := p2putil.PerfInd{RTT: 10} // BS RTT for now
     cache = pcache.NewPeerCache(reqPerf)
     // Boot up managing function
-    rchan = make(chan pcache.PeerRequest, 100)
+    // Make rchan blocking to allow as much time as possible for the cache
+    // to add a new instance before the microservice requests it again
+    rchan = make(chan pcache.PeerRequest, 0)
     go pcache.UpdateCache(&manager.Host, rchan, &cache)
 
     // Setup HTTP proxy service

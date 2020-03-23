@@ -51,16 +51,6 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) 
             stream.Close()
 
             fmt.Println("Got response from peer:", str)
-            //match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
-            //if err != nil {
-            //    fmt.Println("unsuccessful")
-            //    return "", err
-            //}
-
-            //if match {
-            //    fmt.Println("successful")
-            //    return str, nil
-            //}
             return p.ID, str, nil
         }
     }
