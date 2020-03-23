@@ -4,7 +4,6 @@ import (
     "bufio"
     "context"
     "fmt"
-    "os"
     "regexp"
     "strconv"
     "strings"
@@ -14,39 +13,13 @@ import (
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/util"
+    "github.com/Multi-Tier-Cloud/docker-driver/docker_driver"
 )
 
 
 // Alias for p2pnode.Node for type safety
 type LCAAllocator struct {
     Host p2pnode.Node
-}
-
-// Temporary function until the real docker alloc gets implemented
-func dockerAlloc(serviceHash string) (string, error) {
-    attr := os.ProcAttr{}
-    process, err := os.StartProcess(
-        "../../demos/helloworld/helloworldserver/helloworldserver",
-        []string{"helloworldAllocator"},
-        &attr,
-    )
-    if err != nil {
-        return "", err
-    }
-    err = process.Release()
-    if err != nil {
-        return "", err
-    }
-
-	//ipAddr, err := util.GetIPAddress()
-	ipAddr, err := util.GetIPAddress()
-    if err != nil {
-        return "", err
-    }
-    // port, err := util.GetFreePort()
-	port := strconv.Itoa(8080)
-
-    return ipAddr + ":" + port, nil
 }
 
 // Allocator Handler that takes care of accepting a connection
@@ -69,7 +42,30 @@ func LCAAllocatorHandler(stream network.Stream) {
     // Respond to command
     switch match[1] {
         case "start-program": {
-            result, err := dockerAlloc(match[2])
+            ipAddress, err := util.GetIPAddress()
+            if err != nil {
+                panic(err)
+            }
+            pp, err := util.GetFreePort()
+            if err != nil {
+                panic(err)
+            }
+            sp, err := util.GetFreePort()
+            if err != nil {
+                panic(err)
+            }
+            proxyPort := strconv.Itoa(pp)
+            servicePort := strconv.Itoa(sp)
+            cfg := docker_driver.Docker_config{
+                Image: match[2],
+                Network: "host",
+                Env: []string{
+                    "PROXY_IP=" + ipAddress,
+                    "PROXY_PORT=" + proxyPort,
+                    "SERVICE_PORT=" + servicePort,
+                },
+            }
+            _, err = docker_driver.RunContainer(cfg)
             if err != nil {
                 _, err2 := rw.WriteString("Error: could not start process\n")
                 if err2 != nil {
@@ -78,7 +74,7 @@ func LCAAllocatorHandler(stream network.Stream) {
                 }
                 panic(err)
             }
-            _, err = rw.WriteString(fmt.Sprintf("%s\n", result))
+            _, err = rw.WriteString(fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
             if err != nil {
                 fmt.Println("Error writing to buffer")
                 panic(err)
@@ -100,7 +96,7 @@ func LCAAllocatorHandler(stream network.Stream) {
                 fmt.Println("Error flushing buffer")
                 panic(err)
             }
-       }
+        }
     }
 
     // Clean up

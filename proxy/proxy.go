@@ -102,18 +102,19 @@ func main() {
     ctx := context.Background()
 
     // Parse command line arguments
-    if len(os.Args) == 1 {
+    if len(os.Args) == 2 {
         fmt.Println("Starting LCA Manager in anonymous mode")
         manager, err = lca.NewLCAManager(ctx, "", "")
-    } else if len(os.Args) == 3 {
+    } else if len(os.Args) == 4 {
         fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[1], os.Args[2])
-        manager, err = lca.NewLCAManager(ctx, os.Args[1], os.Args[2])
+                    os.Args[2], os.Args[3])
+        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
     } else {
         fmt.Println("Usage:")
-        fmt.Println("$./proxyserver [service address]")
-        fmt.Println("    service: name of the service for proxy to bind to")
-        fmt.Println("    address: IP:PORT of the service for proxy to bind to")
+        fmt.Println("$./proxyserver PORT [SERVICE ADDRESS]")
+        fmt.Println("    PORT: local port for proxy to run on")
+        fmt.Println("    SERVICE: name of the service for proxy to bind to")
+        fmt.Println("    ADDRESS: IP:PORT of the service for proxy to bind to")
         fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
         fmt.Println("\"anonymous mode\" allows a client to access the network without")
         fmt.Println("having to register and advertise itself in the network")
@@ -135,7 +136,7 @@ func main() {
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
-    fmt.Println("Starting HTTP Proxy on 127.0.0.1:4201")
+    fmt.Println("Starting HTTP Proxy on 127.0.0.1:" + os.Args[1])
     http.HandleFunc("/", requestHandler)
-    log.Fatal(http.ListenAndServe(":4201", nil))
+    log.Fatal(http.ListenAndServe("127.0.0.1:" + os.Args[1], nil))
 }
