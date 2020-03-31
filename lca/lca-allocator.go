@@ -42,6 +42,16 @@ func LCAAllocatorHandler(stream network.Stream) {
     // Respond to command
     switch match[1] {
         case "start-program": {
+            imageName := match[2]
+            _, err = docker_driver.PullImage(imageName)
+            if err != nil {
+                _, err2 := rw.WriteString("Error: could not pull image\n")
+                if err2 != nil {
+                    fmt.Println("Error writing to buffer")
+                    panic(err2)
+                }
+                panic(err)
+            }
             ipAddress, err := util.GetIPAddress()
             if err != nil {
                 panic(err)
@@ -57,7 +67,7 @@ func LCAAllocatorHandler(stream network.Stream) {
             proxyPort := strconv.Itoa(pp)
             servicePort := strconv.Itoa(sp)
             cfg := docker_driver.Docker_config{
-                Image: match[2],
+                Image: imageName,
                 Network: "host",
                 Env: []string{
                     "PROXY_IP=" + ipAddress,
