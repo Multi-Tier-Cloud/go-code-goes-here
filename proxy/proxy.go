@@ -23,7 +23,6 @@ var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
-var rchan chan pcache.PeerRequest
 
 // Handles the "proxying" part of proxy
 func requestHandler(w http.ResponseWriter, r *http.Request) {
@@ -49,55 +48,57 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         arguments = tokens[2]
     }
 
-    serviceAddress := ""
     // 2. Search for cached instances
-    // TODO: allow search by service name
-    _, serviceAddress, err = cache.GetPeer(serviceHash)
-    if err != nil {
-        // If does not exist, use libp2p connection to find/create service
-        fmt.Println("Finding best existing service instance")
-        startTime := time.Now()
-        id, serviceAddress, err := manager.FindService(serviceHash)
+    // Continuously search until an instance is found
+    for {
+        info, serviceAddress, err := cache.GetPeer(serviceHash)
         if err != nil {
-            fmt.Println("Could not find, creating new service instance")
-            id, serviceAddress, err = manager.AllocService(dockerHash)
+            // If does not exist, use libp2p connection to find/create service
+            fmt.Println("Finding best existing service instance")
+            startTime := time.Now()
+            id, serviceAddress, err := manager.FindService(serviceHash)
             if err != nil {
-                fmt.Println("No services able to be found or created")
+                fmt.Println("Could not find, creating new service instance")
+                id, serviceAddress, err = manager.AllocService(dockerHash)
+                if err != nil {
+                    fmt.Println("No services able to be found or created")
+                    fmt.Fprintf(w, "%s\n", err)
+                    panic(err)
+                }
+            }
+
+            elapsedTime := time.Now().Sub(startTime)
+            fmt.Println("Took", elapsedTime)
+
+            // Cache peer information and loop again
+            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+        }
+
+        // Run request
+        if serviceAddress != "" {
+            request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
+            fmt.Println("Running request:", request)
+            resp, err := http.Get(request)
+            if err != nil {
+                cache.RemovePeer(info.ID, serviceAddress)
+                continue
+            }
+            defer resp.Body.Close()
+
+            // Return result
+            fmt.Println("Sending response back to requester")
+            body, err := ioutil.ReadAll(resp.Body)
+            if err != nil {
                 fmt.Fprintf(w, "%s\n", err)
                 panic(err)
             }
+
+            fmt.Fprintf(w,"%s\n", string(body))
+            fmt.Println("Response from service:", string(body))
+            return
+        } else {
+            fmt.Fprintf(w,"%s\n", "Error: Could not find service")
         }
-
-        elapsedTime := time.Now().Sub(startTime)
-        fmt.Println("Took", elapsedTime)
-
-        // Cache peer information and loop again
-        rchan <- pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress}
-    }
-
-    // Run request
-    if serviceAddress != "" {
-        request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-        fmt.Println("Running request:", request)
-        resp, err := http.Get(request)
-        if err != nil {
-            fmt.Fprintf(w, "%s\n", err)
-            panic(err)
-        }
-        defer resp.Body.Close()
-
-        // Return result
-        fmt.Println("Sending response back to requester")
-        body, err := ioutil.ReadAll(resp.Body)
-        if err != nil {
-            fmt.Fprintf(w, "%s\n", err)
-            panic(err)
-        }
-
-        fmt.Fprintf(w,"%s\n", string(body))
-        fmt.Println("Response from service:", string(body))
-    } else {
-        fmt.Fprintf(w,"%s\n", "Error: Could not find service")
     }
 }
 
@@ -107,7 +108,14 @@ func main() {
     ctx := context.Background()
 
     // Parse command line arguments
-    if len(os.Args) != 2 && len(os.Args) != 4 {
+    if len(os.Args) == 2 {
+        fmt.Println("Starting LCA Manager in anonymous mode")
+        manager, err = lca.NewLCAManager(ctx, "", "")
+    } else if len(os.Args) == 4 {
+        fmt.Println("Starting LCA Manager in service mode with arguments",
+                    os.Args[2], os.Args[3])
+        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
+    } else {
         fmt.Println("Usage:")
         fmt.Println("$./proxyserver PORT [SERVICE ADDRESS]")
         fmt.Println("    PORT: local port for proxy to run on")
@@ -117,6 +125,9 @@ func main() {
         fmt.Println("\"anonymous mode\" allows a client to access the network without")
         fmt.Println("having to register and advertise itself in the network")
         os.Exit(1)
+    }
+    if err != nil {
+        panic(err)
     }
 
     // Setup cache
@@ -133,26 +144,13 @@ func main() {
         panic(err)
     }
     json.Unmarshal(perfByte, &reqPerf)
+    reqPerf.RTT = reqPerf.RTT * time.Millisecond
     fmt.Println("Setting performance requirements based on perf.conf to:",
         reqPerf.RTT)
     // Create cache instance
-    cache = pcache.NewPeerCache(reqPerf)
+    cache = pcache.NewPeerCache(reqPerf, &manager.Host)
     // Boot up cache managment function
-    rchan = make(chan pcache.PeerRequest, 0)
-    go pcache.UpdateCache(&manager.Host, rchan, &cache)
-
-    // Setup LCA Manager with earlier parsed settings
-    if len(os.Args) == 2 {
-        fmt.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "")
-    } else if len(os.Args) == 4 {
-        fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[2], os.Args[3])
-        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
-    }
-    if err != nil {
-        panic(err)
-    }
+    go cache.UpdateCache()
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
