@@ -34,6 +34,11 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) 
 
     peers := p2putil.SortPeers(peerChan, lca.Host)
 
+    // Print out RTT for testing
+    // for _, p := range peers {
+    //     fmt.Println(p.ID, ":", p.Perf)
+    // }
+
     for _, p := range peers {
         fmt.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAManagerProtocolID)

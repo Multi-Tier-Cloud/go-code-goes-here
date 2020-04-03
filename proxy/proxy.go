@@ -9,6 +9,7 @@ import (
     "net/http"
     "os"
     "strings"
+    "time"
 
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
@@ -55,6 +56,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     if err != nil {
         // If does not exist, use libp2p connection to find/create service
         fmt.Println("Finding best existing service instance")
+        startTime := time.Now()
         id, serviceAddress, err := manager.FindService(serviceHash)
         if err != nil {
             fmt.Println("Could not find, creating new service instance")
@@ -65,6 +67,9 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
                 panic(err)
             }
         }
+
+        elapsedTime := time.Now().Sub(startTime)
+        fmt.Println("Took", elapsedTime)
 
         // Cache peer information and loop again
         rchan <- pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress}
