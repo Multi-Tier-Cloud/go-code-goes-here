@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "encoding/json"
     "fmt"
     "io/ioutil"
     "log"
@@ -98,18 +99,10 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
     var err error
 
-    // Setup LCA Manager
     ctx := context.Background()
 
     // Parse command line arguments
-    if len(os.Args) == 2 {
-        fmt.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "")
-    } else if len(os.Args) == 4 {
-        fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[2], os.Args[3])
-        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
-    } else {
+    if len(os.Args) != 2 && len(os.Args) != 4 {
         fmt.Println("Usage:")
         fmt.Println("$./proxyserver PORT [SERVICE ADDRESS]")
         fmt.Println("    PORT: local port for proxy to run on")
@@ -120,18 +113,41 @@ func main() {
         fmt.Println("having to register and advertise itself in the network")
         os.Exit(1)
     }
+
+    // Setup cache
+    // Read in cache config
+    fmt.Println("Launching proxy PeerCache instance")
+    var reqPerf p2putil.PerfInd
+    perfFile, err := os.Open("perf.conf")
     if err != nil {
         panic(err)
     }
-
-    // Setup cache
-    reqPerf := p2putil.PerfInd{RTT: 10} // BS RTT for now
+    defer perfFile.Close()
+    perfByte, err := ioutil.ReadAll(perfFile)
+    if err != nil {
+        panic(err)
+    }
+    json.Unmarshal(perfByte, &reqPerf)
+    fmt.Println("Setting performance requirements based on perf.conf to:",
+        reqPerf.RTT)
+    // Create cache instance
     cache = pcache.NewPeerCache(reqPerf)
-    // Boot up managing function
-    // Make rchan blocking to allow as much time as possible for the cache
-    // to add a new instance before the microservice requests it again
+    // Boot up cache managment function
     rchan = make(chan pcache.PeerRequest, 0)
     go pcache.UpdateCache(&manager.Host, rchan, &cache)
+
+    // Setup LCA Manager with earlier parsed settings
+    if len(os.Args) == 2 {
+        fmt.Println("Starting LCA Manager in anonymous mode")
+        manager, err = lca.NewLCAManager(ctx, "", "")
+    } else if len(os.Args) == 4 {
+        fmt.Println("Starting LCA Manager in service mode with arguments",
+                    os.Args[2], os.Args[3])
+        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
+    }
+    if err != nil {
+        panic(err)
+    }
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
