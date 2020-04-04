@@ -147,7 +147,7 @@ func main() {
     reqPerf.SoftReq.RTT = reqPerf.SoftReq.RTT * time.Millisecond
     reqPerf.HardReq.RTT = reqPerf.HardReq.RTT * time.Millisecond
     fmt.Println("Setting performance requirements based on perf.conf to:",
-        reqPerf.SoftReq.RTT, reqPerf.HardReq.RTT)
+        "soft limit:", reqPerf.SoftReq.RTT, "hard limit:", reqPerf.HardReq.RTT)
     // Create cache instance
     cache = pcache.NewPeerCache(reqPerf, &manager.Host)
     // Boot up cache managment function
