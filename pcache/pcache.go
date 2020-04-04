@@ -3,6 +3,7 @@ package pcache
 import (
     "errors"
     "fmt"
+    "sync"
     "time"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
@@ -11,6 +12,11 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
 )
+
+type PerfConf struct {
+    SoftReq p2putil.PerfInd
+    HardReq p2putil.PerfInd
+}
 
 // New type with PeerInfo and RCount
 // R stands for Reliability and counts how many times
@@ -25,15 +31,27 @@ type RPeerInfo struct {
 // PeerCache holds the performance requirements
 // and peer levels based on reliability
 type PeerCache struct {
-    ReqPerf p2putil.PerfInd
+    ReqPerf PerfConf
     NLevels uint
     Levels  [][]RPeerInfo
+    // Synchronization
+    node    *p2pnode.Node
+    mux     sync.Mutex
+    rmax    uint
+}
+
+// Request struct for request addition of peer in UpdateCache
+type PeerRequest struct {
+    ID      peer.ID
+    Hash    string
+    Address string
 }
 
 // Constructor for PeerCache
 // Takes performance requirements (reqPerf) as argument
-func NewPeerCache(reqPerf p2putil.PerfInd) PeerCache {
+func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
     var peerCache PeerCache
+    peerCache.node = node
     peerCache.ReqPerf = reqPerf
     // This is hardcoded for now as there really isn't
     // need for any more levels than three
@@ -45,13 +63,71 @@ func NewPeerCache(reqPerf p2putil.PerfInd) PeerCache {
     for i := uint(0); i < peerCache.NLevels; i++ {
         peerCache.Levels = append(peerCache.Levels, []RPeerInfo{})
     }
+    // Look for top 3 cache results when deleting
+    peerCache.rmax = 3
     return peerCache
+}
+
+// Helper function "add peer to slice"
+func apts(s []RPeerInfo, p RPeerInfo) []RPeerInfo {
+    s = append(s, p)
+    return s
+}
+
+// Helper function "remove peer from slice"
+func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
+    s[len(s)-1], s[i] = s[i], s[len(s)-1]
+    return s[:len(s)-1]
+}
+
+func (cache *PeerCache) AddPeer(p PeerRequest) error {
+    fmt.Println("Adding new peer with ID", p.ID)
+    // Ping peer to check if it's up and for performance
+    responseChan := ping.Ping(cache.node.Ctx, cache.node.Host, p.ID)
+    result := <-responseChan
+    // If peer isn't up send back error
+    // TODO: check if this is the correct error condition
+    if result.RTT == 0 {
+        return errors.New("Peer is not up")
+    }
+    // Add peer to cache in second lowest level
+    cache.mux.Lock()
+    defer cache.mux.Unlock()
+    cache.Levels[cache.NLevels-2] = apts(cache.Levels[cache.NLevels-2],
+        RPeerInfo{
+            RCount: 50, Info: p2putil.PeerInfo{
+                Perf: p2putil.PerfInd{RTT: result.RTT}, ID: p.ID,
+            }, Hash: p.Hash, Address: p.Address,
+        },
+    )
+    return nil
+}
+
+func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
+    cache.mux.Lock()
+    defer cache.mux.Unlock()
+    count := uint(0)
+    for l := uint(0); l < (cache.NLevels-1); l++ {
+        for i, p := range cache.Levels[l] {
+            if count < cache.rmax {
+                if id == p.Info.ID && address == p.Address {
+                    cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+                    return
+                }
+            } else {
+                return
+            }
+        }
+    }
+    return
 }
 
 // Gets a reliable peer from cache
 func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
     // Search levels starting from level 0 (most reliable)
     // omitting the last level (non-performant peers due for removal)
+    cache.mux.Lock()
+    defer cache.mux.Unlock()
     for l := uint(0); l < (cache.NLevels-1); l++ {
         for _, p := range cache.Levels[l] {
             // Return the first performant peer
@@ -65,28 +141,25 @@ func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
     return p2putil.PeerInfo{}, "", errors.New("No suitable peer found in cache")
 }
 
-// Helper function "remove peer from slice"
-func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
-    s[len(s)-1], s[i] = s[i], s[len(s)-1]
-    return s[:len(s)-1]
-}
 
 // Helper function that updates RCounts and changes peer reliability levels in cache
-func updateCache(node *p2pnode.Node, cache *PeerCache) {
+func (cache *PeerCache) updateCache() {
+    cache.mux.Lock()
+    defer cache.mux.Unlock()
     nLevels := cache.NLevels
     // First pass: update RCounts
     for l := uint(0); l < nLevels; l++ {
-        for _, p := range cache.Levels[l] {
+        for i, p := range cache.Levels[l] {
             // Ping peers to check performance
             // TODO: set timeout based on performance requirement
-            responseChan := ping.Ping(node.Ctx, node.Host, p.Info.ID)
+            responseChan := ping.Ping(cache.node.Ctx, cache.node.Host, p.Info.ID)
             result := <-responseChan
-            // If peer isn't up set RCount to 0
+            // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
-            if result.RTT == 0 {
-                p.RCount = 0
+            if result.RTT == 0 || p2putil.PerfIndCompare(cache.ReqPerf.HardReq, perf) {
+                cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
             // If peer is up and doesn't meet requirements decrement RCount by 10
-            } else if p2putil.PerfIndCompare(cache.ReqPerf, perf) {
+            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 p.Info.Perf = perf
                 if p.RCount < 10 {
                     p.RCount = 0
@@ -102,7 +175,7 @@ func updateCache(node *p2pnode.Node, cache *PeerCache) {
             }
         }
     }
-    // Second pass: move peers into appropriate new levels
+    // Second pass: move updated peers into appropriate new levels
     // Remove all peers in last level (unreliable peers)
     // TODO: check if this implementation causes memory leaks
     cache.Levels[nLevels-1] = []RPeerInfo{}
@@ -135,12 +208,6 @@ func updateCache(node *p2pnode.Node, cache *PeerCache) {
     }
 }
 
-// Request struct for request addition of peer in UpdateCache
-type PeerRequest struct {
-    ID      peer.ID
-    Hash    string
-    Address string
-}
 
 // Takes care of adding new peers and updating cache levels
 // UpdateCache must be run in a separate goroutine
@@ -149,43 +216,20 @@ type PeerRequest struct {
 // the error message corresponding to its request
 // The requesting function must loop on add and get until get succeeds
 // See cache section of service-manager/proxy/proxy.go in requestHandler for example
-func UpdateCache(node *p2pnode.Node, addpeer <-chan PeerRequest, cache *PeerCache) {
+func (cache *PeerCache) UpdateCache() {
     // Start a timer to track when to run update
     fmt.Println("Launching cache update function")
     ticker := time.NewTicker(1 * time.Second)
-    defer ticker.Stop()
     for {
         select {
-        // Check with precedence for new peer add requests
-        case p := <-addpeer:
-            fmt.Println("Adding new peer with ID", p.ID)
-            // Ping peer to check if it's up and for performance
-            responseChan := ping.Ping(node.Ctx, node.Host, p.ID)
-            result := <-responseChan
-            // If peer isn't up send back error
-            // TODO: check if this is the correct error condition
-            if result.RTT == 0 {
-                break
-            }
-            // Add peer to cache in second lowest level
-            cache.Levels[cache.NLevels-2] = append(cache.Levels[cache.NLevels-2],
-                RPeerInfo{
-                    RCount: 50, Info: p2putil.PeerInfo{
-                        Perf: p2putil.PerfInd{RTT: result.RTT}, ID: p.ID,
-                    }, Hash: p.Hash, Address: p.Address,
-                },
-            )
-        // TODO: create fairness policy
-        // Are datastructures in go automatically thread safe?
+        case <-ticker.C:
+            // Kill ticker to prevent ticking while updating cache
+            ticker.Stop()
+            cache.updateCache()
+            // Create new ticker to restart ticking after update
+            ticker = time.NewTicker(1 * time.Second)
         default:
-            select {
-            // If timer has fired, update cache
-            case <-ticker.C:
-                updateCache(node, cache)
-            // If the timer hasn't fired yet
-            default:
-                // Do nothing
-            }
+            // Do nothing
         }
     }
 }

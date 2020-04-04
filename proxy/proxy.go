@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "encoding/json"
     "fmt"
     "io/ioutil"
     "log"
@@ -10,7 +11,6 @@ import (
     "strings"
     "time"
 
-    "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
     "github.com/Multi-Tier-Cloud/service-manager/lca"
@@ -22,14 +22,14 @@ var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
-var rchan chan pcache.PeerRequest
 
 // Handles the "proxying" part of proxy
 func requestHandler(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("Got request:", r.URL.Path[1:])
+    fmt.Println("Got request:", r.URL.RequestURI()[1:])
 
     // 1. Find service information and arguments from URL
-    tokens := strings.SplitN(r.URL.Path, "/", 3)
+    // URL.RequestURI() includes path?query (URL.Path only has the path)
+    tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
     fmt.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
@@ -48,62 +48,63 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         arguments = tokens[2]
     }
 
-    serviceAddress := ""
     // 2. Search for cached instances
-    // TODO: allow search by service name
-    _, serviceAddress, err = cache.GetPeer(serviceHash)
-    if err != nil {
-        // If does not exist, use libp2p connection to find/create service
-        fmt.Println("Finding best existing service instance")
-        startTime := time.Now()
-        id, serviceAddress, err := manager.FindService(serviceHash)
+    // Continuously search until an instance is found
+    for {
+        info, serviceAddress, err := cache.GetPeer(serviceHash)
         if err != nil {
-            fmt.Println("Could not find, creating new service instance")
-            id, serviceAddress, err = manager.AllocService(dockerHash)
+            // If does not exist, use libp2p connection to find/create service
+            fmt.Println("Finding best existing service instance")
+            startTime := time.Now()
+            id, serviceAddress, err := manager.FindService(serviceHash)
             if err != nil {
-                fmt.Println("No services able to be found or created")
+                fmt.Println("Could not find, creating new service instance")
+                id, serviceAddress, err = manager.AllocService(dockerHash)
+                if err != nil {
+                    fmt.Println("No services able to be found or created")
+                    fmt.Fprintf(w, "%s\n", err)
+                    panic(err)
+                }
+            }
+
+            elapsedTime := time.Now().Sub(startTime)
+            fmt.Println("Took", elapsedTime)
+
+            // Cache peer information and loop again
+            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+        }
+
+        // Run request
+        if serviceAddress != "" {
+            request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
+            fmt.Println("Running request:", request)
+            resp, err := http.Get(request)
+            if err != nil {
+                cache.RemovePeer(info.ID, serviceAddress)
+                continue
+            }
+            defer resp.Body.Close()
+
+            // Return result
+            fmt.Println("Sending response back to requester")
+            body, err := ioutil.ReadAll(resp.Body)
+            if err != nil {
                 fmt.Fprintf(w, "%s\n", err)
                 panic(err)
             }
+
+            fmt.Fprintf(w,"%s\n", string(body))
+            fmt.Println("Response from service:", string(body))
+            return
+        } else {
+            fmt.Fprintf(w,"%s\n", "Error: Could not find service")
         }
-
-        elapsedTime := time.Now().Sub(startTime)
-        fmt.Println("Took", elapsedTime)
-
-        // Cache peer information and loop again
-        rchan <- pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress}
-    }
-
-    // Run request
-    if serviceAddress != "" {
-        request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-        fmt.Println("Running request:", request)
-        resp, err := http.Get(request)
-        if err != nil {
-            fmt.Fprintf(w, "%s\n", err)
-            panic(err)
-        }
-        defer resp.Body.Close()
-
-        // Return result
-        fmt.Println("Sending response back to requester")
-        body, err := ioutil.ReadAll(resp.Body)
-        if err != nil {
-            fmt.Fprintf(w, "%s\n", err)
-            panic(err)
-        }
-
-        fmt.Fprintf(w,"%s\n", string(body))
-        fmt.Println("Response from service:", string(body))
-    } else {
-        fmt.Fprintf(w,"%s\n", "Error: Could not find service")
     }
 }
 
 func main() {
     var err error
 
-    // Setup LCA Manager
     ctx := context.Background()
 
     // Parse command line arguments
@@ -130,13 +131,27 @@ func main() {
     }
 
     // Setup cache
-    reqPerf := p2putil.PerfInd{RTT: 10} // BS RTT for now
-    cache = pcache.NewPeerCache(reqPerf)
-    // Boot up managing function
-    // Make rchan blocking to allow as much time as possible for the cache
-    // to add a new instance before the microservice requests it again
-    rchan = make(chan pcache.PeerRequest, 0)
-    go pcache.UpdateCache(&manager.Host, rchan, &cache)
+    // Read in cache config
+    fmt.Println("Launching proxy PeerCache instance")
+    var reqPerf pcache.PerfConf
+    perfFile, err := os.Open("perf.conf")
+    if err != nil {
+        panic(err)
+    }
+    defer perfFile.Close()
+    perfByte, err := ioutil.ReadAll(perfFile)
+    if err != nil {
+        panic(err)
+    }
+    json.Unmarshal(perfByte, &reqPerf)
+    reqPerf.SoftReq.RTT = reqPerf.SoftReq.RTT * time.Millisecond
+    reqPerf.HardReq.RTT = reqPerf.HardReq.RTT * time.Millisecond
+    fmt.Println("Setting performance requirements based on perf.conf to:",
+        "soft limit:", reqPerf.SoftReq.RTT, "hard limit:", reqPerf.HardReq.RTT)
+    // Create cache instance
+    cache = pcache.NewPeerCache(reqPerf, &manager.Host)
+    // Boot up cache managment function
+    go cache.UpdateCache()
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
