@@ -26,10 +26,11 @@ var cache pcache.PeerCache
 
 // Handles the "proxying" part of proxy
 func requestHandler(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("Got request:", r.URL.Path[1:])
+    fmt.Println("Got request:", r.URL.RequestURI()[1:])
 
     // 1. Find service information and arguments from URL
-    tokens := strings.SplitN(r.URL.Path, "/", 3)
+    // URL.RequestURI() includes path?query (URL.Path only has the path)
+    tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
     fmt.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
