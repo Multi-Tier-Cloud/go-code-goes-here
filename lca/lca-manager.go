@@ -35,9 +35,9 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) 
     peers := p2putil.SortPeers(peerChan, lca.Host)
 
     // Print out RTT for testing
-    // for _, p := range peers {
-    //     fmt.Println(p.ID, ":", p.Perf)
-    // }
+    for i, p := range peers {
+        fmt.Println(i, ":", p.ID, ":", p.Perf)
+    }
 
     for _, p := range peers {
         fmt.Println("Attempting to contact peer with pid:", p.ID)
@@ -88,7 +88,8 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     stream.Close()
 
     // Parse IP address and Port
-    match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,4}$", []byte(str))
+    fmt.Println("New instance:", str)
+    match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,5}$", []byte(str))
     if err != nil {
         return "", err
     }
@@ -110,6 +111,11 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, error)
 
     // Sort Allocators based on performance
     peers := p2putil.SortPeers(peerChan, lca.Host)
+
+    // Print out RTT for testing
+    for i, p := range peers {
+        fmt.Println(i, ":", p.ID, ":", p.Perf)
+    }
 
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {

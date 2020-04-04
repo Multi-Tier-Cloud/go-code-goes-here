@@ -68,7 +68,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
             }
 
             elapsedTime := time.Now().Sub(startTime)
-            fmt.Println("Took", elapsedTime)
+            fmt.Println("Find/alloc service took:", elapsedTime)
 
             // Cache peer information and loop again
             cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
@@ -80,6 +80,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
             fmt.Println("Running request:", request)
             resp, err := http.Get(request)
             if err != nil {
+                fmt.Println(err)
                 cache.RemovePeer(info.ID, serviceAddress)
                 continue
             }
