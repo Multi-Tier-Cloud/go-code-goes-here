@@ -11,7 +11,6 @@ import (
     "strings"
     "time"
 
-    "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
     "github.com/Multi-Tier-Cloud/service-manager/lca"
@@ -133,7 +132,7 @@ func main() {
     // Setup cache
     // Read in cache config
     fmt.Println("Launching proxy PeerCache instance")
-    var reqPerf p2putil.PerfInd
+    var reqPerf pcache.PerfConf
     perfFile, err := os.Open("perf.conf")
     if err != nil {
         panic(err)
@@ -144,9 +143,10 @@ func main() {
         panic(err)
     }
     json.Unmarshal(perfByte, &reqPerf)
-    reqPerf.RTT = reqPerf.RTT * time.Millisecond
+    reqPerf.SoftReq.RTT = reqPerf.SoftReq.RTT * time.Millisecond
+    reqPerf.HardReq.RTT = reqPerf.HardReq.RTT * time.Millisecond
     fmt.Println("Setting performance requirements based on perf.conf to:",
-        reqPerf.RTT)
+        reqPerf.SoftReq.RTT, reqPerf.HardReq.RTT)
     // Create cache instance
     cache = pcache.NewPeerCache(reqPerf, &manager.Host)
     // Boot up cache managment function

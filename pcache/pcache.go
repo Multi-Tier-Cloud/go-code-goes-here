@@ -13,6 +13,11 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
 )
 
+type PerfConf struct {
+    SoftReq p2putil.PerfInd
+    HardReq p2putil.PerfInd
+}
+
 // New type with PeerInfo and RCount
 // R stands for Reliability and counts how many times
 // a peer has been reliable
@@ -26,7 +31,7 @@ type RPeerInfo struct {
 // PeerCache holds the performance requirements
 // and peer levels based on reliability
 type PeerCache struct {
-    ReqPerf p2putil.PerfInd
+    ReqPerf PerfConf
     NLevels uint
     Levels  [][]RPeerInfo
     // Synchronization
@@ -44,7 +49,7 @@ type PeerRequest struct {
 
 // Constructor for PeerCache
 // Takes performance requirements (reqPerf) as argument
-func NewPeerCache(reqPerf p2putil.PerfInd, node *p2pnode.Node) PeerCache {
+func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
     var peerCache PeerCache
     peerCache.node = node
     peerCache.ReqPerf = reqPerf
@@ -144,17 +149,17 @@ func (cache *PeerCache) updateCache() {
     nLevels := cache.NLevels
     // First pass: update RCounts
     for l := uint(0); l < nLevels; l++ {
-        for _, p := range cache.Levels[l] {
+        for i, p := range cache.Levels[l] {
             // Ping peers to check performance
             // TODO: set timeout based on performance requirement
             responseChan := ping.Ping(cache.node.Ctx, cache.node.Host, p.Info.ID)
             result := <-responseChan
-            // If peer isn't up set RCount to 0
+            // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
-            if result.RTT == 0 {
-                p.RCount = 0
+            if result.RTT == 0 || p2putil.PerfIndCompare(cache.ReqPerf.HardReq, perf) {
+                cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
             // If peer is up and doesn't meet requirements decrement RCount by 10
-            } else if p2putil.PerfIndCompare(cache.ReqPerf, perf) {
+            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 p.Info.Perf = perf
                 if p.RCount < 10 {
                     p.RCount = 0
@@ -170,7 +175,7 @@ func (cache *PeerCache) updateCache() {
             }
         }
     }
-    // Second pass: move peers into appropriate new levels
+    // Second pass: move updated peers into appropriate new levels
     // Remove all peers in last level (unreliable peers)
     // TODO: check if this implementation causes memory leaks
     cache.Levels[nLevels-1] = []RPeerInfo{}
