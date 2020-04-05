@@ -51,7 +51,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // 2. Search for cached instances
-    // Continuously search until an instance is found
+    // Continuously search until an instance is found is found in cache
     for {
         id, serviceAddress, err := cache.GetPeer(serviceHash)
         if err != nil {
@@ -72,8 +72,9 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
                 id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     fmt.Println("No services able to be created, using previously found peer")
+                } else {
+                    id, serviceAddress = id2, serviceAddress2
                 }
-                id, serviceAddress = id2, serviceAddress2
             }
 
             elapsedTime := time.Now().Sub(startTime)
@@ -81,6 +82,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 
             // Cache peer information and loop again
             cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+            continue
         }
 
         // Run request
