@@ -53,7 +53,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     // 2. Search for cached instances
     // Continuously search until an instance is found
     for {
-        _, serviceAddress, err := cache.GetPeer(serviceHash)
+        id, serviceAddress, err := cache.GetPeer(serviceHash)
         if err != nil {
             // If does not exist, use libp2p connection to find/create service
             fmt.Println("Finding best existing service instance")
@@ -69,13 +69,11 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
                 }
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 fmt.Println("Found service does not meet requirements, creating new service instance")
-                id2, serviceAddress2, perf2, err := manager.AllocService(dockerHash)
+                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     fmt.Println("No services able to be created, using previously found peer")
                 }
-                if p2putil.PerfIndCompare(perf2, perf) {
-                    id, serviceAddress = id2, serviceAddress2
-                }
+                id, serviceAddress = id2, serviceAddress2
             }
 
             elapsedTime := time.Now().Sub(startTime)
@@ -86,24 +84,27 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         }
 
         // Run request
-        request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-        fmt.Println("Running request:", request)
-        resp, err := http.Get(request)
-        if err != nil {
-            fmt.Println(err)
-            fmt.Fprintf(w, "Error: Change this to a response with error code 502")
+        if serviceAddress != "" {
+            request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
+            fmt.Println("Running request:", request)
+            resp, err := http.Get(request)
+            if err != nil {
+                fmt.Println(err)
+                fmt.Fprintf(w, "Error: Change this to a response with error code 502")
+                go cache.RemovePeer(id, serviceAddress)
+                return
+            }
+            defer resp.Body.Close()
+
+            // Return result
+            // This returns errors as well
+            // Ideally this would find another instance if there is an error
+            // but just keep this behaviour for now
+            fmt.Println("Sending response back to requester")
+            body, err := ioutil.ReadAll(resp.Body)
+            fmt.Fprintf(w, string(body))
             return
         }
-        defer resp.Body.Close()
-
-        // Return result
-        // This returns errors as well
-        // Ideally this would find another instance if there is an error
-        // but just keep this behaviour for now
-        fmt.Println("Sending response back to requester")
-        body, err := ioutil.ReadAll(resp.Body)
-        fmt.Fprintf(w, string(body))
-        return
     }
 }
 

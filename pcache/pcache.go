@@ -125,7 +125,7 @@ func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
 }
 
 // Gets a reliable peer from cache
-func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
+func (cache *PeerCache) GetPeer(hash string) (peer.ID, string, error) {
     // Search levels starting from level 0 (most reliable)
     // omitting the last level (non-performant peers due for removal)
     cache.mux.Lock()
@@ -135,11 +135,11 @@ func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
             // Return the first performant peer
             if p.Hash == hash {
                 fmt.Println("Getting peer with ID", p.Info.ID, "from pcache")
-                return p.Info, p.Address, nil
+                return p.Info.ID, p.Address, nil
             }
         }
     }
-    return p2putil.PeerInfo{}, "", errors.New("No suitable peer found in cache")
+    return peer.ID(""), "", errors.New("No suitable peer found in cache")
 }
 
 

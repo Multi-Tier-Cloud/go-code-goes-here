@@ -138,6 +138,48 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
     return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
 }
 
+// Requests allocation on LCA Allocators with performance better than "perf"
+func (lca *LCAManager) AllocBetterService(
+    serviceHash string, perf p2putil.PerfInd,
+) (
+    peer.ID, string, p2putil.PerfInd, error,
+) {
+    // Look for Allocators
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAllocatorRendezvous)
+    if err != nil {
+        return peer.ID(""), "", p2putil.PerfInd{}, err
+    }
+
+    // Sort Allocators based on performance
+    peers := p2putil.SortPeers(peerChan, lca.Host)
+
+    // Print out RTT for testing
+    //for i, p := range peers {
+    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //}
+
+    // Request allocation until one succeeds then return allocated service address
+    for _, p := range peers {
+        if p2putil.PerfIndCompare(perf, p.Perf) {
+            return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find better service")
+        }
+        fmt.Println("Attempting to contact peer with pid:", p.ID)
+        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAAllocatorProtocolID)
+        if err != nil {
+            continue
+        } else {
+            result, err := requestAlloc(stream, serviceHash)
+            if err != nil {
+                continue
+            }
+
+            return p.ID, result, p.Perf, nil
+        }
+    }
+
+    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
+}
+
 // Stub
 // Used to check the health of the service the LCA Manager is responsible for
 func pingService() error {
