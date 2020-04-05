@@ -3,6 +3,7 @@ package lca
 import (
     "bufio"
     "context"
+    "errors"
     "fmt"
     "regexp"
     "strings"
@@ -25,21 +26,22 @@ type LCAManager struct {
 }
 
 // Finds the best service instance by pinging other LCA Manager instances
-func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) {
+func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
     fmt.Println("Finding providers for:", serviceHash)
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
     if err != nil {
-        panic(err)
+        return peer.ID(""), "", p2putil.PerfInd{}, err
     }
 
     peers := p2putil.SortPeers(peerChan, lca.Host)
 
     // Print out RTT for testing
-    for i, p := range peers {
-        fmt.Println(i, ":", p.ID, ":", p.Perf)
-    }
+    //for i, p := range peers {
+    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //}
 
     for _, p := range peers {
+        // Get microservice address from peer's proxy
         fmt.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAManagerProtocolID)
         if err != nil {
@@ -49,18 +51,18 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, error) 
             str, err := rw.ReadString('\n')
             if err != nil {
                 fmt.Println("Error reading from buffer")
-                return peer.ID(""), "", err
+                return peer.ID(""), "", p2putil.PerfInd{}, err
             }
             str = strings.TrimSuffix(str, "\n")
 
             stream.Close()
 
             fmt.Println("Got response from peer:", str)
-            return p.ID, str, nil
+            return p.ID, str, p.Perf, nil
         }
     }
 
-    return peer.ID(""), "", ErrUhOh
+    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
 }
 
 // Helper function to AllocService that handles the communication with LCA Allocator
@@ -98,24 +100,24 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
         return str, nil
     }
 
-    return "", ErrUhOh
+    return "", errors.New("Returned address does not match format")
 }
 
 // Requests allocation on LCA Allocators with good network performance
-func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, error) {
+func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
     // Look for Allocators
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAllocatorRendezvous)
     if err != nil {
-        return peer.ID(""), "", err
+        return peer.ID(""), "", p2putil.PerfInd{}, err
     }
 
     // Sort Allocators based on performance
     peers := p2putil.SortPeers(peerChan, lca.Host)
 
     // Print out RTT for testing
-    for i, p := range peers {
-        fmt.Println(i, ":", p.ID, ":", p.Perf)
-    }
+    //for i, p := range peers {
+    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //}
 
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {
@@ -129,11 +131,11 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, error)
                 continue
             }
 
-            return p.ID, result, nil
+            return p.ID, result, p.Perf, nil
         }
     }
 
-    return peer.ID(""), "", ErrUhOh
+    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
 }
 
 // Stub
@@ -148,6 +150,7 @@ func pingService() error {
 // that it is still up then sends the service address back to the requester.
 func NewLCAManagerHandler(address string) func(network.Stream) {
     return func(stream network.Stream) {
+        defer stream.Close()
         fmt.Println("Got a new LCA Manager request")
         rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
         err := pingService()

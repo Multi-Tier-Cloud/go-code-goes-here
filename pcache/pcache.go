@@ -3,6 +3,7 @@ package pcache
 import (
     "errors"
     "fmt"
+    "sort"
     "sync"
     "time"
 
@@ -34,24 +35,27 @@ type PeerCache struct {
     ReqPerf PerfConf
     NLevels uint
     Levels  [][]RPeerInfo
-    // Synchronization
+    // Private variables
     node    *p2pnode.Node
     mux     sync.Mutex
     rmax    uint
 }
 
-// Request struct for request addition of peer in UpdateCache
+// Request struct to request addition of peer in UpdateCache
 type PeerRequest struct {
     ID      peer.ID
     Hash    string
     Address string
 }
 
+func RPeerInfoCompare(l, r RPeerInfo) bool {
+    return p2putil.PerfIndCompare(l.Info.Perf, r.Info.Perf)
+}
+
 // Constructor for PeerCache
 // Takes performance requirements (reqPerf) as argument
 func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
     var peerCache PeerCache
-    peerCache.node = node
     peerCache.ReqPerf = reqPerf
     // This is hardcoded for now as there really isn't
     // need for any more levels than three
@@ -63,6 +67,8 @@ func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
     for i := uint(0); i < peerCache.NLevels; i++ {
         peerCache.Levels = append(peerCache.Levels, []RPeerInfo{})
     }
+    // Private variables
+    peerCache.node = node
     // Look for top 3 cache results when deleting
     peerCache.rmax = 3
     return peerCache
@@ -80,46 +86,42 @@ func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
     return s[:len(s)-1]
 }
 
-func (cache *PeerCache) AddPeer(p PeerRequest) error {
+func (cache *PeerCache) AddPeer(p PeerRequest) {
     fmt.Println("Adding new peer with ID", p.ID)
-    // Ping peer to check if it's up and for performance
-    responseChan := ping.Ping(cache.node.Ctx, cache.node.Host, p.ID)
-    result := <-responseChan
-    // If peer isn't up send back error
-    // TODO: check if this is the correct error condition
-    if result.RTT == 0 {
-        return errors.New("Peer is not up")
-    }
     // Add peer to cache in second lowest level
     cache.mux.Lock()
     defer cache.mux.Unlock()
     cache.Levels[cache.NLevels-2] = apts(cache.Levels[cache.NLevels-2],
         RPeerInfo{
+            // Set RCount to 50 so it doesn't immediately get kicked
+            // to the last level upon cache update
             RCount: 50, Info: p2putil.PeerInfo{
-                Perf: p2putil.PerfInd{RTT: result.RTT}, ID: p.ID,
+                Perf: p2putil.PerfInd{}, ID: p.ID,
             }, Hash: p.Hash, Address: p.Address,
         },
     )
-    return nil
 }
 
 func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
     cache.mux.Lock()
     defer cache.mux.Unlock()
-    count := uint(0)
     for l := uint(0); l < (cache.NLevels-1); l++ {
+        count := uint(0)
         for i, p := range cache.Levels[l] {
+            // In each cache level look at the first rmax peers
             if count < cache.rmax {
+                // Check if the current peer is the one to delete
                 if id == p.Info.ID && address == p.Address {
                     cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
                     return
                 }
+                count++
             } else {
-                return
+                // Go to next level
+                break
             }
         }
     }
-    return
 }
 
 // Gets a reliable peer from cache
@@ -131,7 +133,6 @@ func (cache *PeerCache) GetPeer(hash string) (p2putil.PeerInfo, string, error) {
     for l := uint(0); l < (cache.NLevels-1); l++ {
         for _, p := range cache.Levels[l] {
             // Return the first performant peer
-            // TODO: design a fairness policy
             if p.Hash == hash {
                 fmt.Println("Getting peer with ID", p.Info.ID, "from pcache")
                 return p.Info, p.Address, nil
@@ -160,62 +161,68 @@ func (cache *PeerCache) updateCache() {
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
             // If peer is up and doesn't meet requirements decrement RCount by 10
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                p.Info.Perf = perf
+                cache.Levels[l][i].Info.Perf = perf
                 if p.RCount < 10 {
-                    p.RCount = 0
+                    cache.Levels[l][i].RCount = 0
                 } else {
-                    p.RCount -= 10
+                    cache.Levels[l][i].RCount -= 10
                 }
-            // If it does meet requirements then increment RCount up to 100
+            // If it does meet requirements then increment RCount
             } else {
-                p.Info.Perf = perf
+                cache.Levels[l][i].Info.Perf = perf
                 if p.RCount < 100 {
-                    p.RCount++
+                    cache.Levels[l][i].RCount++
                 }
             }
         }
     }
     // Second pass: move updated peers into appropriate new levels
-    // Remove all peers in last level (unreliable peers)
-    // TODO: check if this implementation causes memory leaks
-    cache.Levels[nLevels-1] = []RPeerInfo{}
     // Move peers in top level down if they become unreliable
-    for i, p := range cache.Levels[0] {
-        if p.RCount < 90 {
+    for i := 0; i < len(cache.Levels[0]); i++ {
+        if cache.Levels[0][i].RCount < 90 {
             // Set RCount to 50 when dropping to penalize inconsistency
-            p.RCount = 50
-            cache.Levels[1] = append(cache.Levels[1], p)
+            cache.Levels[0][i].RCount = 50
+            cache.Levels[1] = apts(cache.Levels[1], cache.Levels[0][i])
             cache.Levels[0] = rpfs(cache.Levels[0], uint(i))
+            // Decrement i to account for rpfs
+            i--
         }
     }
     // Move peers in middle level(s) to appropriate new levels
     for l := uint(1); l < (cache.NLevels-1); l++ {
-        for i, p := range cache.Levels[l] {
-            if p.RCount > 90 {
-                // Do not change RCount so consistently reliable peers
-                // get promoted quickly
-                cache.Levels[l-1] = append(cache.Levels[l-1], p)
+        for i := 0; i < len(cache.Levels[l]); i++ {
+            if cache.Levels[l][i].RCount > 90 {
+                // Do not change RCount when promoting so consistently
+                // reliable peers get promoted quickly
+                cache.Levels[l-1] = apts(cache.Levels[l-1], cache.Levels[l][i])
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
-            } else if p.RCount < 10 {
+                // Decrement i to account for rpfs
+                i--
+            } else if cache.Levels[l][i].RCount < 10 {
                 // Set RCount to 50 when dropping to give a slight
                 // buffer so nodes do not chain drop to the last level
                 // while it is recovering
-                p.RCount = 50
-                cache.Levels[l+1] = append(cache.Levels[l+1], p)
+                cache.Levels[l][i].RCount = 50
+                cache.Levels[l+1] = apts(cache.Levels[l+1], cache.Levels[l][i])
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+                // Decrement i to account for rpfs
+                i--
             }
         }
+    }
+    // Remove all peers in last level (unreliable peers)
+    cache.Levels[nLevels-1] = cache.Levels[nLevels-1][0:0]
+    // Third pass: sort elements based on performance
+    for l := uint(0); l < nLevels; l++ {
+        sort.Slice(cache.Levels[l], func(i, j int) bool {
+            return RPeerInfoCompare(cache.Levels[l][i], cache.Levels[l][j])
+        })
     }
 }
 
 
 // Takes care of adding new peers and updating cache levels
-// UpdateCache must be run in a separate goroutine
-// This function no longer reports errors as there's no good way to
-// allow the calling function which itself is multithreaded to find
-// the error message corresponding to its request
-// The requesting function must loop on add and get until get succeeds
-// See cache section of service-manager/proxy/proxy.go in requestHandler for example
+// UpdateCache ideally is run in a separate goroutine
 func (cache *PeerCache) UpdateCache() {
     // Start a timer to track when to run update
     fmt.Println("Launching cache update function")
