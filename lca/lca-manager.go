@@ -225,12 +225,15 @@ func NewLCAManagerHandler(address string) func(network.Stream) {
 
 // Constructor for LCA Manager instance
 // If serviceName is empty string start instance in "anonymous mode"
-func NewLCAManager(ctx context.Context, serviceName string, serviceAddress string) (LCAManager, error) {
+func NewLCAManager(ctx context.Context, serviceName string, serviceAddress string, bootstraps []string) (LCAManager, error) {
     var err error
 
     var node LCAManager
 
     config := p2pnode.NewConfig()
+    if len(bootstraps) != 0 {
+        config.BootstrapPeers = bootstraps
+    }
     config.StreamHandlers = []network.StreamHandler{NewLCAManagerHandler(serviceAddress)}
     config.HandlerProtocolIDs = []protocol.ID{LCAManagerProtocolID}
     if serviceName != "" {

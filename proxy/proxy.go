@@ -3,6 +3,7 @@ package main
 import (
     "context"
     "encoding/json"
+    "flag"
     "fmt"
     "io/ioutil"
     "log"
@@ -15,9 +16,9 @@ import (
 
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
+    "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
-    "github.com/Multi-Tier-Cloud/service-manager/conf"
 )
 
 // Global LCA Manager instance to handle peer search and allocation
@@ -116,23 +117,40 @@ func main() {
 
     ctx := context.Background()
 
-    // TODO: Parse command line arguments
-    mode := "anonymous"
-    configPath := "../conf/conf.json"
-    if true {
+    flag.Usage = func() {
         fmt.Println("Usage:")
-        fmt.Println("$./proxy PORT [SERVICE ADDRESS] [--configfile PATH]")
+        fmt.Println("$./proxy [--configfile PATH] PORT [SERVICE ADDRESS]")
+        fmt.Println("    PATH: path to configuration file to use")
         fmt.Println("    PORT: local port for proxy to run on")
         fmt.Println("    SERVICE: name of the service for proxy to bind to")
         fmt.Println("    ADDRESS: IP:PORT of the service for proxy to bind to")
-        fmt.Println("    PATH: path to config file to use")
         fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
         fmt.Println("\"anonymous mode\" allows a client to access the network without")
         fmt.Println("having to register and advertise itself in the network")
-        os.Exit(1)
     }
-    if err != nil {
-        panic(err)
+
+    // Parse options
+    var configPath string
+    flag.StringVar(&configPath, "configfile", "../conf/conf.json", "path to config file to use")
+    flag.Parse()
+
+    // Parse arguments
+    var mode string
+    var port string
+    var service string
+    var address string
+    switch flag.NArg() {
+    case 1:
+        mode = "anonymous"
+        port = flag.Arg(0)
+    case 3:
+        mode = "service"
+        port = flag.Arg(0)
+        service = flag.Arg(1)
+        address = flag.Arg(2)
+    default:
+        flag.Usage()
+        os.Exit(1)
     }
 
     // Read in config file
@@ -159,12 +177,14 @@ func main() {
         manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps)
     } else {
         fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[2], os.Args[3])
-        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3], config.Bootstraps)
+                    service, address)
+        manager, err = lca.NewLCAManager(ctx, service, address, config.Bootstraps)
     }
 
 
     // Setup cache
+    config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
+    config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
     fmt.Println("Launching proxy PeerCache instance")
     fmt.Println("Setting performance requirements based on perf.conf",
         "soft limit:", config.Perf.SoftReq.RTT, "hard limit:", config.Perf.HardReq.RTT)
@@ -176,7 +196,7 @@ func main() {
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
-    fmt.Println("Starting HTTP Proxy on 127.0.0.1:" + os.Args[1])
+    fmt.Println("Starting HTTP Proxy on 127.0.0.1:" + port)
     http.HandleFunc("/", requestHandler)
-    log.Fatal(http.ListenAndServe("127.0.0.1:" + os.Args[1], nil))
+    log.Fatal(http.ListenAndServe("127.0.0.1:" + port, nil))
 }

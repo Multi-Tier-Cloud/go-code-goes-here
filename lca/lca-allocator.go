@@ -115,11 +115,14 @@ func LCAAllocatorHandler(stream network.Stream) {
 }
 
 // Constructor for LCA Allocator
-func NewLCAAllocator(ctx context.Context) (LCAAllocator, error) {
+func NewLCAAllocator(ctx context.Context, bootstraps []string) (LCAAllocator, error) {
     var err error
     var node LCAAllocator
 
     config := p2pnode.NewConfig()
+    if len(bootstraps) != 0 {
+        config.BootstrapPeers = bootstraps
+    }
     config.StreamHandlers = []network.StreamHandler{LCAAllocatorHandler}
     config.HandlerProtocolIDs = []protocol.ID{LCAAllocatorProtocolID}
     config.Rendezvous = []string{LCAAllocatorRendezvous}
