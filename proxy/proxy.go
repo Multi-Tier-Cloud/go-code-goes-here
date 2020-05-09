@@ -3,6 +3,7 @@ package main
 import (
     "context"
     "encoding/json"
+    "flag"
     "fmt"
     "io/ioutil"
     "log"
@@ -11,8 +12,11 @@ import (
     "strings"
     "time"
 
+    "github.com/Multi-Tier-Cloud/common/p2putil"
+
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
+    "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
 )
@@ -49,21 +53,29 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // 2. Search for cached instances
-    // Continuously search until an instance is found
+    // Continuously search until an instance is found is found in cache
     for {
-        info, serviceAddress, err := cache.GetPeer(serviceHash)
+        id, serviceAddress, err := cache.GetPeer(serviceHash)
         if err != nil {
             // If does not exist, use libp2p connection to find/create service
             fmt.Println("Finding best existing service instance")
+
             startTime := time.Now()
-            id, serviceAddress, err := manager.FindService(serviceHash)
+
+            id, serviceAddress, perf, err := manager.FindService(serviceHash)
             if err != nil {
                 fmt.Println("Could not find, creating new service instance")
-                id, serviceAddress, err = manager.AllocService(dockerHash)
+                id, serviceAddress, perf, err = manager.AllocService(dockerHash)
                 if err != nil {
                     fmt.Println("No services able to be found or created")
-                    fmt.Fprintf(w, "%s\n", err)
-                    panic(err)
+                }
+            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
+                fmt.Println("Found service does not meet requirements, creating new service instance")
+                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
+                if err != nil {
+                    fmt.Println("No services able to be created, using previously found peer")
+                } else {
+                    id, serviceAddress = id2, serviceAddress2
                 }
             }
 
@@ -72,6 +84,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 
             // Cache peer information and loop again
             cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+            continue
         }
 
         // Run request
@@ -81,24 +94,20 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
             resp, err := http.Get(request)
             if err != nil {
                 fmt.Println(err)
-                cache.RemovePeer(info.ID, serviceAddress)
-                continue
+                fmt.Fprintf(w, "Error: Change this to a response with error code 502")
+                go cache.RemovePeer(id, serviceAddress)
+                return
             }
             defer resp.Body.Close()
 
             // Return result
+            // This returns errors as well
+            // Ideally this would find another instance if there is an error
+            // but just keep this behaviour for now
             fmt.Println("Sending response back to requester")
             body, err := ioutil.ReadAll(resp.Body)
-            if err != nil {
-                fmt.Fprintf(w, "%s\n", err)
-                panic(err)
-            }
-
-            fmt.Fprintf(w,"%s\n", string(body))
-            fmt.Println("Response from service:", string(body))
+            fmt.Fprintf(w, string(body))
             return
-        } else {
-            fmt.Fprintf(w,"%s\n", "Error: Could not find service")
         }
     }
 }
@@ -108,56 +117,86 @@ func main() {
 
     ctx := context.Background()
 
-    // Parse command line arguments
-    if len(os.Args) == 2 {
-        fmt.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "")
-    } else if len(os.Args) == 4 {
-        fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[2], os.Args[3])
-        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
-    } else {
+    flag.Usage = func() {
         fmt.Println("Usage:")
-        fmt.Println("$./proxyserver PORT [SERVICE ADDRESS]")
+        fmt.Println("$./proxy [--configfile PATH] PORT [SERVICE ADDRESS]")
+        fmt.Println("    PATH: path to configuration file to use")
         fmt.Println("    PORT: local port for proxy to run on")
         fmt.Println("    SERVICE: name of the service for proxy to bind to")
         fmt.Println("    ADDRESS: IP:PORT of the service for proxy to bind to")
         fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
         fmt.Println("\"anonymous mode\" allows a client to access the network without")
         fmt.Println("having to register and advertise itself in the network")
-        os.Exit(1)
-    }
-    if err != nil {
-        panic(err)
     }
 
+    // Parse options
+    var configPath string
+    flag.StringVar(&configPath, "configfile", "../conf/conf.json", "path to config file to use")
+    flag.Parse()
+
+    // Parse arguments
+    var mode string
+    var port string
+    var service string
+    var address string
+    switch flag.NArg() {
+    case 1:
+        mode = "anonymous"
+        port = flag.Arg(0)
+    case 3:
+        mode = "service"
+        port = flag.Arg(0)
+        service = flag.Arg(1)
+        address = flag.Arg(2)
+    default:
+        flag.Usage()
+        os.Exit(1)
+    }
+
+    // Read in config file
+    config := conf.Config{}
+    configFile, err := os.Open(configPath)
+    if err != nil {
+        panic(err)
+    }
+    configByte, err := ioutil.ReadAll(configFile)
+    if err != nil {
+        configFile.Close()
+        panic(err)
+    }
+    err = json.Unmarshal(configByte, &config)
+    if err != nil {
+        configFile.Close()
+        panic(err)
+    }
+    configFile.Close()
+
+    // Setup LCA Manager
+    if mode == "anonymous" {
+        fmt.Println("Starting LCA Manager in anonymous mode")
+        manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps)
+    } else {
+        fmt.Println("Starting LCA Manager in service mode with arguments",
+                    service, address)
+        manager, err = lca.NewLCAManager(ctx, service, address, config.Bootstraps)
+    }
+
+
     // Setup cache
-    // Read in cache config
+    config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
+    config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
     fmt.Println("Launching proxy PeerCache instance")
-    var reqPerf pcache.PerfConf
-    perfFile, err := os.Open("perf.conf")
-    if err != nil {
-        panic(err)
-    }
-    defer perfFile.Close()
-    perfByte, err := ioutil.ReadAll(perfFile)
-    if err != nil {
-        panic(err)
-    }
-    json.Unmarshal(perfByte, &reqPerf)
-    reqPerf.SoftReq.RTT = reqPerf.SoftReq.RTT * time.Millisecond
-    reqPerf.HardReq.RTT = reqPerf.HardReq.RTT * time.Millisecond
-    fmt.Println("Setting performance requirements based on perf.conf to:",
-        "soft limit:", reqPerf.SoftReq.RTT, "hard limit:", reqPerf.HardReq.RTT)
+    fmt.Println("Setting performance requirements based on perf.conf",
+        "soft limit:", config.Perf.SoftReq.RTT, "hard limit:", config.Perf.HardReq.RTT)
     // Create cache instance
-    cache = pcache.NewPeerCache(reqPerf, &manager.Host)
+    cache = pcache.NewPeerCache(config.Perf, &manager.Host)
     // Boot up cache managment function
     go cache.UpdateCache()
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
-    fmt.Println("Starting HTTP Proxy on 127.0.0.1:" + os.Args[1])
+    fmt.Println("Starting HTTP Proxy on 127.0.0.1:" + port)
     http.HandleFunc("/", requestHandler)
-    log.Fatal(http.ListenAndServe("127.0.0.1:" + os.Args[1], nil))
+    log.Fatal(http.ListenAndServe("127.0.0.1:" + port, nil))
 }

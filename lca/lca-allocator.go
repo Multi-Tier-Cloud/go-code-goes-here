@@ -25,6 +25,7 @@ type LCAAllocator struct {
 // Allocator Handler that takes care of accepting a connection
 // from an LCA Manager and allocating the requested service
 func LCAAllocatorHandler(stream network.Stream) {
+    defer stream.Close()
     fmt.Println("Got new LCA Allocator request")
     // Open communication channels
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
@@ -111,15 +112,17 @@ func LCAAllocatorHandler(stream network.Stream) {
 
     // Clean up
     fmt.Println("Closing stream")
-    stream.Close()
 }
 
 // Constructor for LCA Allocator
-func NewLCAAllocator(ctx context.Context) (LCAAllocator, error) {
+func NewLCAAllocator(ctx context.Context, bootstraps []string) (LCAAllocator, error) {
     var err error
     var node LCAAllocator
 
     config := p2pnode.NewConfig()
+    if len(bootstraps) != 0 {
+        config.BootstrapPeers = bootstraps
+    }
     config.StreamHandlers = []network.StreamHandler{LCAAllocatorHandler}
     config.HandlerProtocolIDs = []protocol.ID{LCAAllocatorProtocolID}
     config.Rendezvous = []string{LCAAllocatorRendezvous}
