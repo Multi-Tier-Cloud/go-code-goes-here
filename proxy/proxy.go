@@ -17,6 +17,7 @@ import (
 
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
+    "github.com/Multi-Tier-Cloud/service-manager/conf"
 )
 
 // Global LCA Manager instance to handle peer search and allocation
@@ -115,20 +116,16 @@ func main() {
 
     ctx := context.Background()
 
-    // Parse command line arguments
-    if len(os.Args) == 2 {
-        fmt.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "")
-    } else if len(os.Args) == 4 {
-        fmt.Println("Starting LCA Manager in service mode with arguments",
-                    os.Args[2], os.Args[3])
-        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3])
-    } else {
+    // TODO: Parse command line arguments
+    mode := "anonymous"
+    configPath := "../conf/conf.json"
+    if true {
         fmt.Println("Usage:")
-        fmt.Println("$./proxyserver PORT [SERVICE ADDRESS]")
+        fmt.Println("$./proxy PORT [SERVICE ADDRESS] [--configfile PATH]")
         fmt.Println("    PORT: local port for proxy to run on")
         fmt.Println("    SERVICE: name of the service for proxy to bind to")
         fmt.Println("    ADDRESS: IP:PORT of the service for proxy to bind to")
+        fmt.Println("    PATH: path to config file to use")
         fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
         fmt.Println("\"anonymous mode\" allows a client to access the network without")
         fmt.Println("having to register and advertise itself in the network")
@@ -138,26 +135,41 @@ func main() {
         panic(err)
     }
 
+    // Read in config file
+    config := conf.Config{}
+    configFile, err := os.Open(configPath)
+    if err != nil {
+        panic(err)
+    }
+    configByte, err := ioutil.ReadAll(configFile)
+    if err != nil {
+        configFile.Close()
+        panic(err)
+    }
+    err = json.Unmarshal(configByte, &config)
+    if err != nil {
+        configFile.Close()
+        panic(err)
+    }
+    configFile.Close()
+
+    // Setup LCA Manager
+    if mode == "anonymous" {
+        fmt.Println("Starting LCA Manager in anonymous mode")
+        manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps)
+    } else {
+        fmt.Println("Starting LCA Manager in service mode with arguments",
+                    os.Args[2], os.Args[3])
+        manager, err = lca.NewLCAManager(ctx, os.Args[2], os.Args[3], config.Bootstraps)
+    }
+
+
     // Setup cache
-    // Read in cache config
     fmt.Println("Launching proxy PeerCache instance")
-    var reqPerf pcache.PerfConf
-    perfFile, err := os.Open("perf.conf")
-    if err != nil {
-        panic(err)
-    }
-    defer perfFile.Close()
-    perfByte, err := ioutil.ReadAll(perfFile)
-    if err != nil {
-        panic(err)
-    }
-    json.Unmarshal(perfByte, &reqPerf)
-    reqPerf.SoftReq.RTT = reqPerf.SoftReq.RTT * time.Millisecond
-    reqPerf.HardReq.RTT = reqPerf.HardReq.RTT * time.Millisecond
     fmt.Println("Setting performance requirements based on perf.conf",
-        "soft limit:", reqPerf.SoftReq.RTT, "hard limit:", reqPerf.HardReq.RTT)
+        "soft limit:", config.Perf.SoftReq.RTT, "hard limit:", config.Perf.HardReq.RTT)
     // Create cache instance
-    cache = pcache.NewPeerCache(reqPerf, &manager.Host)
+    cache = pcache.NewPeerCache(config.Perf, &manager.Host)
     // Boot up cache managment function
     go cache.UpdateCache()
 
