@@ -1,19 +1,12 @@
 package lca
 
 import (
-    "errors"
-
     "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/multiformats/go-multiaddr"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
 )
-
-
-// Generic error object
-// TODO: replace this with more specific errors
-var ErrUhOh = errors.New("Communication error with LCA")
 
 
 // Useful defaults

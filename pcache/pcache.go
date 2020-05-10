@@ -1,6 +1,7 @@
 package pcache
 
 import (
+    "context"
     "errors"
     "fmt"
     "sort"
@@ -147,13 +148,16 @@ func (cache *PeerCache) GetPeer(hash string) (peer.ID, string, error) {
 func (cache *PeerCache) updateCache() {
     cache.mux.Lock()
     defer cache.mux.Unlock()
+    // Setup context
+    ctx, cancel := context.WithCancel(cache.node.Ctx)
+    defer cancel()
     nLevels := cache.NLevels
     // First pass: update RCounts
     for l := uint(0); l < nLevels; l++ {
         for i, p := range cache.Levels[l] {
             // Ping peers to check performance
             // TODO: set timeout based on performance requirement
-            responseChan := ping.Ping(cache.node.Ctx, cache.node.Host, p.Info.ID)
+            responseChan := ping.Ping(ctx, cache.node.Host, p.Info.ID)
             result := <-responseChan
             // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
@@ -228,7 +232,14 @@ func (cache *PeerCache) UpdateCache() {
     fmt.Println("Launching cache update function")
     ticker := time.NewTicker(1 * time.Second)
     for {
+        if cache.node.Ctx.Err() != nil {
+            ticker.Stop()
+            return
+        }
         select {
+        case <-cache.node.Ctx.Done():
+            ticker.Stop()
+            return
         case <-ticker.C:
             // Kill ticker to prevent ticking while updating cache
             ticker.Stop()

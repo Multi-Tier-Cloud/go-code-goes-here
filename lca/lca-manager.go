@@ -28,7 +28,13 @@ type LCAManager struct {
 // Finds the best service instance by pinging other LCA Manager instances
 func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
     fmt.Println("Finding providers for:", serviceHash)
-    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, serviceHash)
+
+    // Setup context
+    ctx, cancel := context.WithCancel(lca.Host.Ctx)
+    defer cancel()
+
+    // Find peers
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, serviceHash)
     if err != nil {
         return peer.ID(""), "", p2putil.PerfInd{}, err
     }
@@ -43,7 +49,7 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
     for _, p := range peers {
         // Get microservice address from peer's proxy
         fmt.Println("Attempting to contact peer with pid:", p.ID)
-        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAManagerProtocolID)
+        stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAManagerProtocolID)
         if err != nil {
             continue
         } else {
@@ -105,8 +111,12 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 
 // Requests allocation on LCA Allocators with good network performance
 func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
+    // Setup context
+    ctx, cancel := context.WithCancel(lca.Host.Ctx)
+    defer cancel()
+
     // Look for Allocators
-    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAllocatorRendezvous)
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, LCAAllocatorRendezvous)
     if err != nil {
         return peer.ID(""), "", p2putil.PerfInd{}, err
     }
@@ -122,7 +132,7 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {
         fmt.Println("Attempting to contact peer with pid:", p.ID)
-        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAAllocatorProtocolID)
+        stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
             continue
         } else {
@@ -144,8 +154,12 @@ func (lca *LCAManager) AllocBetterService(
 ) (
     peer.ID, string, p2putil.PerfInd, error,
 ) {
+    // Setup context
+    ctx, cancel := context.WithCancel(lca.Host.Ctx)
+    defer cancel()
+
     // Look for Allocators
-    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(lca.Host.Ctx, LCAAllocatorRendezvous)
+    peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, LCAAllocatorRendezvous)
     if err != nil {
         return peer.ID(""), "", p2putil.PerfInd{}, err
     }
@@ -164,7 +178,7 @@ func (lca *LCAManager) AllocBetterService(
             return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find better service")
         }
         fmt.Println("Attempting to contact peer with pid:", p.ID)
-        stream, err := lca.Host.Host.NewStream(lca.Host.Ctx, p.ID, LCAAllocatorProtocolID)
+        stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
             continue
         } else {
