@@ -246,8 +246,6 @@ func (cache *PeerCache) UpdateCache() {
             cache.updateCache()
             // Create new ticker to restart ticking after update
             ticker = time.NewTicker(1 * time.Second)
-        default:
-            // Do nothing
         }
     }
 }
