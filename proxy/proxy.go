@@ -12,6 +12,8 @@ import (
     "strings"
     "time"
 
+    "github.com/libp2p/go-libp2p-core/peer"
+
     "github.com/Multi-Tier-Cloud/common/p2putil"
 
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
@@ -28,6 +30,7 @@ var manager lca.LCAManager
 var cache pcache.PeerCache
 
 // Handles the "proxying" part of proxy
+// TODO: Refactor this function
 func requestHandler(w http.ResponseWriter, r *http.Request) {
     fmt.Println("Got request:", r.URL.RequestURI()[1:])
 
@@ -52,10 +55,20 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         arguments = tokens[2]
     }
 
+    var id peer.ID
+    var serviceAddress string
+
     // 2. Search for cached instances
-    // Continuously search until an instance is found is found in cache
-    for {
-        id, serviceAddress, err := cache.GetPeer(serviceHash)
+    // Search for an instance in the cache, up to 3 attempts
+    for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
+        // Backoff before searching again (the 5s is arbitrary at this point)
+        // TODO: Remove hard-coding
+        if attempts > 0 {
+            time.Sleep(5 * time.Second)
+        }
+
+        id, serviceAddress, err = cache.GetPeer(serviceHash)
+        fmt.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
         if err != nil {
             // If does not exist, use libp2p connection to find/create service
             fmt.Println("Finding best existing service instance")
@@ -68,6 +81,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
                 id, serviceAddress, perf, err = manager.AllocService(dockerHash)
                 if err != nil {
                     fmt.Println("No services able to be found or created")
+                    continue
                 }
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 fmt.Println("Found service does not meet requirements, creating new service instance")
@@ -86,30 +100,33 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
             cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
             continue
         }
-
-        // Run request
-        if serviceAddress != "" {
-            request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-            fmt.Println("Running request:", request)
-            resp, err := http.Get(request)
-            if err != nil {
-                fmt.Println(err)
-                fmt.Fprintf(w, "Error: Change this to a response with error code 502")
-                go cache.RemovePeer(id, serviceAddress)
-                return
-            }
-            defer resp.Body.Close()
-
-            // Return result
-            // This returns errors as well
-            // Ideally this would find another instance if there is an error
-            // but just keep this behaviour for now
-            fmt.Println("Sending response back to requester")
-            body, err := ioutil.ReadAll(resp.Body)
-            fmt.Fprintf(w, string(body))
-            return
-        }
     }
+
+    if serviceAddress == "" || id == peer.ID("") {
+        http.NotFound(w, r)
+        return
+    }
+
+    // Run request
+    request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
+    fmt.Println("Running request:", request)
+    resp, err := http.Get(request)
+    if err != nil {
+        fmt.Println(err)
+        fmt.Fprintf(w, "Error: Change this to a response with error code 502")
+        go cache.RemovePeer(id, serviceAddress)
+        return
+    }
+    defer resp.Body.Close()
+
+    // Return result
+    // This returns errors as well
+    // Ideally this would find another instance if there is an error
+    // but just keep this behaviour for now
+    fmt.Println("Sending response back to requester")
+    body, err := ioutil.ReadAll(resp.Body)
+    fmt.Fprintf(w, string(body))
+    return
 }
 
 func main() {
