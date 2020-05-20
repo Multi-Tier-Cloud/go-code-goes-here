@@ -7,12 +7,19 @@ import (
     "fmt"
     "io/ioutil"
     "os"
+    "net/http"
 
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
+
+    "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main () {
+    // Start Prometheus endpoint for stats collection
+    http.Handle("/metrics", promhttp.Handler())
+    go http.ListenAndServe(":9100", nil)
+
     ctx := context.Background()
 
     // Parse options
