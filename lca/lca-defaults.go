@@ -1,6 +1,8 @@
 package lca
 
 import (
+    "log"
+
     "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/multiformats/go-multiaddr"
@@ -32,5 +34,8 @@ func init() {
 
     LCAAllocatorProtocolID = protocol.ID("/LCAAllocator/1.0")
     LCAAllocatorRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
+
+    // Set up logging defaults
+    log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
