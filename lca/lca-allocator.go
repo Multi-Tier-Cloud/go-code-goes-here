@@ -7,6 +7,7 @@ import (
     "regexp"
     "strconv"
     "strings"
+    "log"
 
     "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/protocol"
@@ -15,7 +16,6 @@ import (
     "github.com/Multi-Tier-Cloud/common/util"
     "github.com/Multi-Tier-Cloud/docker-driver/docker_driver"
 )
-
 
 // Alias for p2pnode.Node for type safety
 type LCAAllocator struct {
@@ -26,15 +26,19 @@ type LCAAllocator struct {
 // from an LCA Manager and allocating the requested service
 func LCAAllocatorHandler(stream network.Stream) {
     defer stream.Close()
-    fmt.Println("Got new LCA Allocator request")
+    log.Println("Got new LCA Allocator request")
     // Open communication channels
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
 
     // Read request
     str, err := rw.ReadString('\n')
     if err != nil {
-        fmt.Println("Error reading from buffer")
-        panic(err)
+        log.Println("Error reading from buffer\n", err)
+
+        // Assume something is wrong with the stream
+        // Don't bother trying to write to it
+        stream.Reset()
+        return
     }
     str = strings.TrimSuffix(str, "\n")
 
@@ -44,14 +48,18 @@ func LCAAllocatorHandler(stream network.Stream) {
     switch match[1] {
         case "start-program": {
             imageName := match[2]
+            log.Println("Received command start-program, starting image:", imageName)
             _, err = docker_driver.PullImage(imageName)
             if err != nil {
+                log.Println("Error calling Docker PullImage()\n", err)
                 _, err2 := rw.WriteString("Error: could not pull image\n")
                 if err2 != nil {
-                    fmt.Println("Error writing to buffer")
-                    panic(err2)
+                    log.Println("Error writing to buffer\n", err2)
+                    stream.Reset()
+                    return
                 }
-                panic(err)
+                rw.Flush()
+                return
             }
             ipAddress, err := util.GetIPAddress()
             if err != nil {
