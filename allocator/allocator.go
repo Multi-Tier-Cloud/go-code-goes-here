@@ -18,7 +18,7 @@ import (
 func main () {
     // Start Prometheus endpoint for stats collection
     http.Handle("/metrics", promhttp.Handler())
-    go http.ListenAndServe(":9100", nil)
+    go http.ListenAndServe(":9101", nil)
 
     ctx := context.Background()
 
