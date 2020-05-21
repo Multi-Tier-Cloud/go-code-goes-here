@@ -34,10 +34,6 @@ func LCAAllocatorHandler(stream network.Stream) {
     str, err := rw.ReadString('\n')
     if err != nil {
         log.Println("Error reading from buffer\n", err)
-
-        // Assume something is wrong with the stream
-        // Don't bother trying to write to it
-        stream.Reset()
         return
     }
     str = strings.TrimSuffix(str, "\n")
@@ -55,7 +51,6 @@ func LCAAllocatorHandler(stream network.Stream) {
                 _, err2 := rw.WriteString("Error: could not pull image\n")
                 if err2 != nil {
                     log.Println("Error writing to buffer\n", err2)
-                    stream.Reset()
                     return
                 }
                 rw.Flush()
@@ -63,15 +58,18 @@ func LCAAllocatorHandler(stream network.Stream) {
             }
             ipAddress, err := util.GetIPAddress()
             if err != nil {
-                panic(err)
+                log.Println("Error getting IP address\n", err)
+                return
             }
             pp, err := util.GetFreePort()
             if err != nil {
-                panic(err)
+                log.Println("Error getting free port for proxy\n", err)
+                return
             }
             sp, err := util.GetFreePort()
             if err != nil {
-                panic(err)
+                log.Println("Error getting free port for service\n", err)
+                return
             }
             proxyPort := strconv.Itoa(pp)
             servicePort := strconv.Itoa(sp)
@@ -86,40 +84,42 @@ func LCAAllocatorHandler(stream network.Stream) {
             }
             _, err = docker_driver.RunContainer(cfg)
             if err != nil {
+                log.Println("Error calling Docker RunContainer()\n", err)
                 _, err2 := rw.WriteString("Error: could not start process\n")
                 if err2 != nil {
-                    fmt.Println("Error writing to buffer")
-                    panic(err2)
+                    log.Println("Error writing to buffer\n", err2)
+                    return
                 }
-                panic(err)
+                rw.Flush()
+                return
             }
             _, err = rw.WriteString(fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
             if err != nil {
-                fmt.Println("Error writing to buffer")
-                panic(err)
+                log.Println("Error writing to buffer\n", err)
+                return
             }
             err = rw.Flush()
             if err != nil {
-                fmt.Println("Error flushing buffer")
-                panic(err)
+                log.Println("Error flushing buffer\n", err)
+                return
             }
         }
         default: {
             _, err = rw.WriteString("Error: unrecognized command\n")
             if err != nil {
-                fmt.Println("Error writing to buffer")
-                panic(err)
+                log.Println("Error writing to buffer\n", err)
+                return
             }
             err = rw.Flush()
             if err != nil {
-                fmt.Println("Error flushing buffer")
-                panic(err)
+                log.Println("Error flushing buffer\n", err)
+                return
             }
         }
     }
 
     // Clean up
-    fmt.Println("Closing stream")
+    log.Println("Closing stream")
 }
 
 // Constructor for LCA Allocator
