@@ -4,8 +4,8 @@ import (
     "context"
     "encoding/json"
     "flag"
-    "fmt"
     "io/ioutil"
+    "log"
     "os"
     "net/http"
 
@@ -34,6 +34,11 @@ var (
     configPath = flag.String("configfile", "../conf/conf.json", "path to config file to use")
 )
 
+func init() {
+    // Set up logging defaults
+    log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
+}
+
 func main () {
     // Parse options
     flag.Parse()
@@ -42,30 +47,30 @@ func main () {
     var err error
 
     if *ephemeral {
-        fmt.Println("Generating a new key...")
+        log.Println("Generating a new key...")
         if priv, err = util.GeneratePrivKey(*algo, *bits); err != nil {
-            fmt.Printf("ERROR: Unable to generate key\n%v", err)
+            log.Printf("ERROR: Unable to generate key\n%v", err)
             os.Exit(1)
         }
     } else {
         if util.FileExists(*keyFileAlloc) {
             if priv, err = util.LoadPrivKeyFromFile(*keyFileAlloc); err != nil {
-                fmt.Printf("ERROR: Unable to load key from file\n%v", err)
+                log.Printf("ERROR: Unable to load key from file\n%v", err)
                 os.Exit(1)
             }
         } else {
-            fmt.Printf("Key does not exist at location: %s.\n", *keyFileAlloc)
-            fmt.Println("Generating a new key...")
+            log.Printf("Key does not exist at location: %s.\n", *keyFileAlloc)
+            log.Println("Generating a new key...")
             if priv, err = util.GeneratePrivKey(*algo, *bits); err != nil {
-                fmt.Printf("ERROR: Unable to generate key\n%v", err)
+                log.Printf("ERROR: Unable to generate key\n%v", err)
                 os.Exit(1)
             }
 
             if err = util.StorePrivKeyToFile(priv, *keyFileAlloc); err != nil {
-                fmt.Printf("ERROR: Unable to save key to file %s\n", *keyFileAlloc)
+                log.Printf("ERROR: Unable to save key to file %s\n", *keyFileAlloc)
                 os.Exit(1)
             }
-            fmt.Println("New key is stored at:", *keyFileAlloc)
+            log.Println("New key is stored at:", *keyFileAlloc)
         }
     }
 
@@ -94,13 +99,13 @@ func main () {
     configFile.Close()
 
     // Spawn LCA Allocator
-    fmt.Println("Spawning LCA Allocator")
+    log.Println("Spawning LCA Allocator")
     _, err = lca.NewLCAAllocator(ctx, config.Bootstraps, priv)
     if err != nil {
         panic(err)
     }
 
     // Wait for connection
-    fmt.Println("Waiting for requests...")
+    log.Println("Waiting for requests...")
     select {}
 }
