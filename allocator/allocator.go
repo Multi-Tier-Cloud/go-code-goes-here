@@ -14,25 +14,9 @@ import (
     "github.com/Multi-Tier-Cloud/service-manager/lca"
 
     "github.com/prometheus/client_golang/prometheus/promhttp"
-
-    "github.com/libp2p/go-libp2p-core/crypto"
 )
 
-var (
-    // TODO: Move key-related flags into common?
-    algo = flag.String("algo", "RSA",
-        "Cryptographic algorithm to use for generating the key.\n"+
-            "Will be ignored if 'genkey' is false.\n"+
-            "Must be one of {RSA, Ed25519, Secp256k1, ECDSA}")
-    bits = flag.Int("bits", 2048,
-        "Key length, in bits. Will be ignored if 'algo' is not RSA.")
-    keyFileAlloc = flag.String("keyfile", "~/.privKeyAlloc",
-        "Location of private key to read from (or write to, if generating).")
-    ephemeral = flag.Bool("ephemeral", false,
-        "Generate a new key just for this run, and don't store it to file.\n"+
-            "If 'keyfile' is specified, it will be ignored.")
-    configPath = flag.String("configfile", "../conf/conf.json", "path to config file to use")
-)
+const defaultKeyFile = "~/.privKeyAlloc"
 
 func init() {
     // Set up logging defaults
@@ -40,38 +24,19 @@ func init() {
 }
 
 func main () {
-    // Parse options
-    flag.Parse()
-
-    var priv crypto.PrivKey
     var err error
 
-    if *ephemeral {
-        log.Println("Generating a new key...")
-        if priv, err = util.GeneratePrivKey(*algo, *bits); err != nil {
-            log.Printf("ERROR: Unable to generate key\n%v", err)
-            os.Exit(1)
-        }
-    } else {
-        if util.FileExists(*keyFileAlloc) {
-            if priv, err = util.LoadPrivKeyFromFile(*keyFileAlloc); err != nil {
-                log.Printf("ERROR: Unable to load key from file\n%v", err)
-                os.Exit(1)
-            }
-        } else {
-            log.Printf("Key does not exist at location: %s.\n", *keyFileAlloc)
-            log.Println("Generating a new key...")
-            if priv, err = util.GeneratePrivKey(*algo, *bits); err != nil {
-                log.Printf("ERROR: Unable to generate key\n%v", err)
-                os.Exit(1)
-            }
+    // Parse options
+    configPath := flag.String("configfile", "../conf/conf.json", "path to config file to use")
+    var keyFlags util.KeyFlags
+    if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
+        log.Fatalln(err)
+    }
+    flag.Parse()
 
-            if err = util.StorePrivKeyToFile(priv, *keyFileAlloc); err != nil {
-                log.Printf("ERROR: Unable to save key to file %s\n", *keyFileAlloc)
-                os.Exit(1)
-            }
-            log.Println("New key is stored at:", *keyFileAlloc)
-        }
+    priv, err := util.CreateOrLoadKey(keyFlags)
+    if err != nil {
+        log.Fatalln(err)
     }
 
     // Start Prometheus endpoint for stats collection

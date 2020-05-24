@@ -9,6 +9,8 @@ github.com/Kubuxu/go-os-helper v0.0.1/go.mod h1:N8B+I7vPCT80IcP58r50u4+gEEcsZETF
 github.com/Multi-Tier-Cloud/common v0.0.0-20200403032527-d7311ad845b4/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
 github.com/Multi-Tier-Cloud/common v0.3.0 h1:dWU5vRJmSnbRHzcqxB+ZjDcJ5CiAcAPRiGgtzeHEIC4=
 github.com/Multi-Tier-Cloud/common v0.3.0/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
+github.com/Multi-Tier-Cloud/common v0.4.0 h1:BD/iP18Aud23s7VJ0mv8dXehqqJtcWZMMZh6LJzihUw=
+github.com/Multi-Tier-Cloud/common v0.4.0/go.mod h1:mYfgQ8NGzZk6T8yQJWkRxgoH/BTgytCYhmljAcIpc/g=
 github.com/Multi-Tier-Cloud/docker-driver v0.0.0-20200504140614-1940e41e8d5a h1:8liUat4qWWl5THjojl26X4YpedCzXiSBFvmiK3zL+eM=
 github.com/Multi-Tier-Cloud/docker-driver v0.0.0-20200504140614-1940e41e8d5a/go.mod h1:dwW1GHo7N7DFF4Ra6m1YH2P41LrC573oX16rnjIP2jM=
 github.com/Multi-Tier-Cloud/hash-lookup v0.1.0 h1:CBt/MjS5CyGLbY9uYqoz6SqHD7NhKfCyjvfdzvIXcOU=
