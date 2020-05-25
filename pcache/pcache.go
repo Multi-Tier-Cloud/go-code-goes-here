@@ -3,10 +3,10 @@ package pcache
 import (
     "context"
     "errors"
-    "fmt"
     "sort"
     "sync"
     "time"
+    "log"
 
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
     "github.com/libp2p/go-libp2p-core/peer"
@@ -14,6 +14,10 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
 )
+
+func init() {
+    log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
+}
 
 type PerfConf struct {
     SoftReq p2putil.PerfInd
@@ -88,7 +92,7 @@ func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
 }
 
 func (cache *PeerCache) AddPeer(p PeerRequest) {
-    fmt.Println("Adding new peer with ID", p.ID)
+    log.Println("Adding new peer with ID", p.ID)
     // Add peer to cache in second lowest level
     cache.mux.Lock()
     defer cache.mux.Unlock()
@@ -135,7 +139,7 @@ func (cache *PeerCache) GetPeer(hash string) (peer.ID, string, error) {
         for _, p := range cache.Levels[l] {
             // Return the first performant peer
             if p.Hash == hash {
-                fmt.Println("Getting peer with ID", p.Info.ID, "from pcache")
+                log.Println("Getting peer with ID", p.Info.ID, "from pcache")
                 return p.Info.ID, p.Address, nil
             }
         }
@@ -229,7 +233,7 @@ func (cache *PeerCache) updateCache() {
 // UpdateCache ideally is run in a separate goroutine
 func (cache *PeerCache) UpdateCache() {
     // Start a timer to track when to run update
-    fmt.Println("Launching cache update function")
+    log.Println("Launching cache update function")
     ticker := time.NewTicker(1 * time.Second)
     for {
         if cache.node.Ctx.Err() != nil {
