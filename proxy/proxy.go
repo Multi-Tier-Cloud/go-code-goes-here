@@ -15,6 +15,7 @@ import (
     "github.com/libp2p/go-libp2p-core/peer"
 
     "github.com/Multi-Tier-Cloud/common/p2putil"
+    "github.com/Multi-Tier-Cloud/common/util"
 
     "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
 
@@ -22,6 +23,8 @@ import (
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
 )
+
+const defaultKeyFile = "~/.privKeyProxy"
 
 func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
@@ -133,29 +136,57 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     return
 }
 
+// Custom usage func to support positional arguments (not trivial in golang)
+func customUsage() {
+    fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+    fmt.Fprintf(flag.CommandLine.Output(),
+        "$ %s [-configfile string] [-algo string] [-bits int] [-keyfile string] " +
+        "[-ephemeral bool] PORT [SERVICE] [ADDRESS]\n", os.Args[0])
+
+    flag.PrintDefaults()
+
+    posArgs := map[string]string {
+        "PORT": "Local port for proxy to listen on",
+        "SERVICE": "Human-readable name of the service for proxy to represent",
+        "ADDRESS": "A string in \"IP:SERVICE_PORT\" format of the address for the proxy to advertise",
+    }
+
+    for name, usage := range posArgs {
+        // Altered from golang's flag.go's PrintDefaults() implementation
+        s := "  " + name
+        if len(s) <= 4 {
+            s += "\t"
+        } else {
+            s += "\n    \t"
+        }
+        s += strings.ReplaceAll(usage, "\n", "\n    \t")
+        fmt.Fprint(flag.CommandLine.Output(), s + "\n")
+    }
+
+    s := "NOTE: PORT, SERVICE, and ADDRESS *must* come after the optional flag arguments."
+    fmt.Fprint(flag.CommandLine.Output(), "\n" + s + "\n")
+
+    s = "If service and address are omitted, proxy launches in anonymous mode.\n" +
+            "Using \"anonymous mode\" allows a client to access the network without\n" +
+            "having to register and advertise itself in the network."
+    fmt.Fprint(flag.CommandLine.Output(), "\n" + s + "\n")
+}
+
 func main() {
     var err error
 
-    ctx := context.Background()
-
-    flag.Usage = func() {
-        fmt.Println("Usage:")
-        fmt.Println("$./proxy [--configfile PATH] PORT [SERVICE ADDRESS]")
-        fmt.Println("    PATH: path to configuration file to use")
-        fmt.Println("    PORT: local port for proxy to run on")
-        fmt.Println("    SERVICE: name of the service for proxy to bind to")
-        fmt.Println("    ADDRESS: IP:PORT of the service for proxy to bind to")
-        fmt.Println("If service and address are omitted, proxy launches in anonymous mode")
-        fmt.Println("\"anonymous mode\" allows a client to access the network without")
-        fmt.Println("having to register and advertise itself in the network")
-    }
-
-    // Parse options
+    // Argument options
     var configPath string
     flag.StringVar(&configPath, "configfile", "../conf/conf.json", "Path to configuration file to use")
-    flag.Parse()
 
-    // Parse arguments
+    var keyFlags util.KeyFlags
+    if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
+        log.Fatalln(err)
+    }
+    flag.Usage = customUsage // Keep this afer adding all flags
+    flag.Parse() // Parse flag arguments
+
+    // Parse positional arguments
     var mode string
     var port string
     var service string
@@ -172,6 +203,11 @@ func main() {
     default:
         flag.Usage()
         os.Exit(1)
+    }
+
+    priv, err := util.CreateOrLoadKey(keyFlags)
+    if err != nil {
+        log.Fatalln(err)
     }
 
     // Read in config file
@@ -193,15 +229,19 @@ func main() {
     configFile.Close()
 
     // Setup LCA Manager
+    ctx := context.Background()
     if mode == "anonymous" {
         log.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps)
+        manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps, priv)
     } else {
         log.Println("Starting LCA Manager in service mode with arguments",
                     service, address)
-        manager, err = lca.NewLCAManager(ctx, service, address, config.Bootstraps)
+        manager, err = lca.NewLCAManager(ctx, service, address, config.Bootstraps, priv)
     }
 
+    if err != nil {
+        log.Fatalf("ERROR: Unable to create LCA Manager\n%s", err)
+    }
 
     // Setup cache
     config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
