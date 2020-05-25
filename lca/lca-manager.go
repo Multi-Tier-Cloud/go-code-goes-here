@@ -7,6 +7,7 @@ import (
     "fmt"
     "regexp"
     "strings"
+    "log"
 
     "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
@@ -27,7 +28,7 @@ type LCAManager struct {
 
 // Finds the best service instance by pinging other LCA Manager instances
 func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
-    fmt.Println("Finding providers for:", serviceHash)
+    log.Println("Finding providers for:", serviceHash)
 
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
@@ -43,27 +44,28 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
 
     // Print out RTT for testing
     //for i, p := range peers {
-    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //    log.Println(i, ":", p.ID, ":", p.Perf)
     //}
 
     for _, p := range peers {
         // Get microservice address from peer's proxy
-        fmt.Println("Attempting to contact peer with pid:", p.ID)
+        log.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAManagerProtocolID)
         if err != nil {
             continue
         } else {
+            defer stream.Reset()
             rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
             str, err := rw.ReadString('\n')
             if err != nil {
-                fmt.Println("Error reading from buffer")
+                log.Println("Error reading from buffer")
                 return peer.ID(""), "", p2putil.PerfInd{}, err
             }
             str = strings.TrimSuffix(str, "\n")
 
             stream.Close()
 
-            fmt.Println("Got response from peer:", str)
+            log.Println("Got response from peer:", str)
             return p.ID, str, p.Perf, nil
         }
     }
@@ -77,28 +79,27 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     // Send command "start-program"
     _, err := rw.WriteString(fmt.Sprintf("start-program %s\n", serviceHash))
     if err != nil {
-        fmt.Println("Error writing to buffer")
+        log.Println("Error writing to buffer")
         return "", err
     }
     err = rw.Flush()
     if err != nil {
-        fmt.Println("Error flushing buffer")
+        log.Println("Error flushing buffer")
         return "", err
     }
 
     str, err := rw.ReadString('\n')
     if err != nil {
-        fmt.Println("Error reading from buffer")
+        log.Println("Error reading from buffer")
         return "", err
     }
     str = strings.TrimSuffix(str, "\n")
 
-    stream.Close()
-
     // Parse IP address and Port
-    fmt.Println("New instance:", str)
+    log.Println("New instance:", str)
     match, err := regexp.Match("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}:[0-9]{1,5}$", []byte(str))
     if err != nil {
+        log.Println("Error performing regex match")
         return "", err
     }
 
@@ -126,16 +127,17 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
 
     // Print out RTT for testing
     //for i, p := range peers {
-    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //    log.Println(i, ":", p.ID, ":", p.Perf)
     //}
 
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {
-        fmt.Println("Attempting to contact peer with pid:", p.ID)
+        log.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
             continue
         } else {
+            defer stream.Reset()
             result, err := requestAlloc(stream, serviceHash)
             if err != nil {
                 continue
@@ -169,7 +171,7 @@ func (lca *LCAManager) AllocBetterService(
 
     // Print out RTT for testing
     //for i, p := range peers {
-    //    fmt.Println(i, ":", p.ID, ":", p.Perf)
+    //    log.Println(i, ":", p.ID, ":", p.Perf)
     //}
 
     // Request allocation until one succeeds then return allocated service address
@@ -177,11 +179,12 @@ func (lca *LCAManager) AllocBetterService(
         if p2putil.PerfIndCompare(perf, p.Perf) {
             return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find better service")
         }
-        fmt.Println("Attempting to contact peer with pid:", p.ID)
+        log.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
             continue
         } else {
+            defer stream.Reset()
             result, err := requestAlloc(stream, serviceHash)
             if err != nil {
                 continue
@@ -207,29 +210,29 @@ func pingService() error {
 func NewLCAManagerHandler(address string) func(network.Stream) {
     return func(stream network.Stream) {
         defer stream.Close()
-        fmt.Println("Got a new LCA Manager request")
+        log.Println("Got a new LCA Manager request")
         rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
         err := pingService()
         if err != nil {
             rw.WriteString("Error\n")
             if err != nil {
-                fmt.Println("Error writing to buffer")
+                log.Println("Error writing to buffer")
                 panic(err)
             }
             err = rw.Flush()
             if err != nil {
-                fmt.Println("Error flushing buffer")
+                log.Println("Error flushing buffer")
                 panic(err)
             }
         } else {
             rw.WriteString(fmt.Sprintf("%s\n", address))
             if err != nil {
-                fmt.Println("Error writing to buffer")
+                log.Println("Error writing to buffer")
                 panic(err)
             }
             err = rw.Flush()
             if err != nil {
-                fmt.Println("Error flushing buffer")
+                log.Println("Error flushing buffer")
                 panic(err)
             }
         }
