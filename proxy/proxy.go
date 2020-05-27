@@ -53,8 +53,10 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         manager.Host.RoutingDiscovery, serviceName,
     )
     if err != nil {
+        http.Error(w, "404 Not Found", http.StatusNotFound)
         fmt.Fprintf(w, "%s\n", err)
         log.Printf("ERROR: Hash lookup failed\n%s\n", err)
+        return
     }
     arguments := ""
     // check if arguments exist
@@ -119,8 +121,10 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println("Running request:", request)
     resp, err := http.Get(request)
     if err != nil {
-        log.Println(err)
-        fmt.Fprintf(w, "Error: Change this to a response with error code 502")
+        log.Println("Request to service returned an error:\n", err)
+
+        // Propagate error code and message to client
+        http.Error(w, "Service error: " + resp.Status, resp.StatusCode)
         go cache.RemovePeer(id, serviceAddress)
         return
     }
