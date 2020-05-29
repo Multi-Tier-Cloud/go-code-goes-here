@@ -14,6 +14,9 @@ import (
 
     "github.com/libp2p/go-libp2p-core/peer"
 
+    "github.com/multiformats/go-multiaddr"
+
+    "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
@@ -144,11 +147,12 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 func customUsage() {
     fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
     fmt.Fprintf(flag.CommandLine.Output(),
-        "$ %s [-configfile string] [-algo string] [-bits int] [-keyfile string] " +
-        "[-ephemeral bool] PORT [SERVICE] [ADDRESS]\n", os.Args[0])
+        "$ %s [OPTIONS ...] PORT [SERVICE] [ADDRESS]\n", os.Args[0])
 
+    fmt.Fprintf(flag.CommandLine.Output(), "\nOPTIONS:\n")
     flag.PrintDefaults()
 
+    fmt.Fprintf(flag.CommandLine.Output(), "\nPOSITIONAL PARAMETERS:\n")
     posArgs := map[string]string {
         "PORT": "Local port for proxy to listen on",
         "SERVICE": "Human-readable name of the service for proxy to represent",
@@ -167,7 +171,7 @@ func customUsage() {
         fmt.Fprint(flag.CommandLine.Output(), s + "\n")
     }
 
-    s := "NOTE: PORT, SERVICE, and ADDRESS *must* come after the optional flag arguments."
+    s := "NOTE: PORT, SERVICE, and ADDRESS *must* come after any OPTIONS flag arguments."
     fmt.Fprint(flag.CommandLine.Output(), "\n" + s + "\n")
 
     s = "If service and address are omitted, proxy launches in anonymous mode.\n" +
@@ -184,10 +188,14 @@ func main() {
     flag.StringVar(&configPath, "configfile", "../conf/conf.json", "Path to configuration file to use")
 
     var keyFlags util.KeyFlags
+    var bootstraps *[]multiaddr.Multiaddr
     if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
         log.Fatalln(err)
     }
-    flag.Usage = customUsage // Keep this afer adding all flags
+    if bootstraps, err = util.AddBootstrapFlags(); err != nil {
+        log.Fatalln(err)
+    }
+    flag.Usage = customUsage // Do this only afer adding all flags
     flag.Parse() // Parse flag arguments
 
     // Parse positional arguments
@@ -232,15 +240,27 @@ func main() {
     }
     configFile.Close()
 
+    if len(*bootstraps) == 0 {
+        if len(config.Bootstraps) == 0 {
+            log.Fatalln("ERROR: Must specify at least one bootstrap node" +
+                "through a command line flag or the configuration file")
+        }
+
+        *bootstraps, err = p2pnode.StringsToMultiaddrs(config.Bootstraps)
+        if err != nil {
+            log.Fatalln(err)
+        }
+    }
+
     // Setup LCA Manager
     ctx := context.Background()
     if mode == "anonymous" {
         log.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "", config.Bootstraps, priv)
+        manager, err = lca.NewLCAManager(ctx, "", "", *bootstraps, priv)
     } else {
         log.Println("Starting LCA Manager in service mode with arguments",
                     service, address)
-        manager, err = lca.NewLCAManager(ctx, service, address, config.Bootstraps, priv)
+        manager, err = lca.NewLCAManager(ctx, service, address, *bootstraps, priv)
     }
 
     if err != nil {
