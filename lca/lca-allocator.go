@@ -13,6 +13,8 @@ import (
     "github.com/libp2p/go-libp2p-core/protocol"
     "github.com/libp2p/go-libp2p-core/crypto"
 
+    "github.com/multiformats/go-multiaddr"
+
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/util"
     "github.com/Multi-Tier-Cloud/docker-driver/docker_driver"
@@ -124,7 +126,7 @@ func LCAAllocatorHandler(stream network.Stream) {
 }
 
 // Constructor for LCA Allocator
-func NewLCAAllocator(ctx context.Context, bootstraps []string,
+func NewLCAAllocator(ctx context.Context, bootstraps []multiaddr.Multiaddr,
                         privKey crypto.PrivKey) (LCAAllocator, error) {
     var err error
     var node LCAAllocator

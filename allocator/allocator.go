@@ -9,7 +9,10 @@ import (
     "os"
     "net/http"
 
+    "github.com/multiformats/go-multiaddr"
+
     "github.com/Multi-Tier-Cloud/common/util"
+    "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
 
@@ -29,7 +32,11 @@ func main () {
     // Parse options
     configPath := flag.String("configfile", "../conf/conf.json", "path to config file to use")
     var keyFlags util.KeyFlags
+    var bootstraps *[]multiaddr.Multiaddr
     if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
+        log.Fatalln(err)
+    }
+    if bootstraps, err = util.AddBootstrapFlags(); err != nil {
         log.Fatalln(err)
     }
     flag.Parse()
@@ -63,9 +70,22 @@ func main () {
     }
     configFile.Close()
 
+    // If CLI didn't specify any bootstraps, fallback to configuration file
+    if len(*bootstraps) == 0 {
+        if len(config.Bootstraps) == 0 {
+            log.Fatalln("ERROR: Must specify at least one bootstrap node" +
+                "through a command line flag or the configuration file")
+        }
+
+        *bootstraps, err = p2pnode.StringsToMultiaddrs(config.Bootstraps)
+        if err != nil {
+            log.Fatalln(err)
+        }
+    }
+
     // Spawn LCA Allocator
     log.Println("Spawning LCA Allocator")
-    _, err = lca.NewLCAAllocator(ctx, config.Bootstraps, priv)
+    _, err = lca.NewLCAAllocator(ctx, *bootstraps, priv)
     if err != nil {
         panic(err)
     }
