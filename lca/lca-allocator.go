@@ -10,10 +10,6 @@ import (
     "log"
 
     "github.com/libp2p/go-libp2p-core/network"
-    "github.com/libp2p/go-libp2p-core/protocol"
-    "github.com/libp2p/go-libp2p-core/crypto"
-
-    "github.com/multiformats/go-multiaddr"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/util"
@@ -126,20 +122,14 @@ func LCAAllocatorHandler(stream network.Stream) {
 }
 
 // Constructor for LCA Allocator
-func NewLCAAllocator(ctx context.Context, bootstraps []multiaddr.Multiaddr,
-                        privKey crypto.PrivKey) (LCAAllocator, error) {
+func NewLCAAllocator(ctx context.Context, cfg p2pnode.Config) (LCAAllocator, error) {
     var err error
     var node LCAAllocator
 
-    config := p2pnode.NewConfig()
-    config.PrivKey = privKey
-    if len(bootstraps) != 0 {
-        config.BootstrapPeers = bootstraps
-    }
-    config.StreamHandlers = []network.StreamHandler{LCAAllocatorHandler}
-    config.HandlerProtocolIDs = []protocol.ID{LCAAllocatorProtocolID}
-    config.Rendezvous = []string{LCAAllocatorRendezvous}
-    node.Host, err = p2pnode.NewNode(ctx, config)
+    cfg.StreamHandlers = append(cfg.StreamHandlers, LCAAllocatorHandler)
+    cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAAllocatorProtocolID)
+    cfg.Rendezvous = append(cfg.Rendezvous, LCAAllocatorRendezvous)
+    node.Host, err = p2pnode.NewNode(ctx, cfg)
     if err != nil {
         return node, err
     }
