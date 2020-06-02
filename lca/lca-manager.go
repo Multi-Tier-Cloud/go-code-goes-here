@@ -9,12 +9,8 @@ import (
     "strings"
     "log"
 
-    "github.com/libp2p/go-libp2p-core/crypto"
     "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
-    "github.com/libp2p/go-libp2p-core/protocol"
-
-    "github.com/multiformats/go-multiaddr"
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
@@ -245,32 +241,24 @@ func NewLCAManagerHandler(address string) func(network.Stream) {
 
 // Constructor for LCA Manager instance
 // If serviceName is empty string start instance in "anonymous mode"
-func NewLCAManager(ctx context.Context, serviceName string,
-                    serviceAddress string, bootstraps []multiaddr.Multiaddr,
-                    privKey crypto.PrivKey) (LCAManager, error) {
+func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
+                    serviceName string, serviceAddress string) (LCAManager, error) {
     var err error
 
     var node LCAManager
 
-    config := p2pnode.NewConfig()
-    config.PrivKey = privKey
-    if len(bootstraps) != 0 {
-        config.BootstrapPeers = bootstraps
-    }
-    config.StreamHandlers = []network.StreamHandler{NewLCAManagerHandler(serviceAddress)}
-    config.HandlerProtocolIDs = []protocol.ID{LCAManagerProtocolID}
+    // Set stream handler, protocol ID, and hash to advertise
+    cfg.StreamHandlers = append(cfg.StreamHandlers, NewLCAManagerHandler(serviceAddress))
+    cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerProtocolID)
     if serviceName != "" {
         // Set rendezvous to service hash value
         node.P2PHash, _, err = hashlookup.GetHash(serviceName)
         if err != nil {
             return node, err
         }
-        config.Rendezvous = []string{node.P2PHash}
-    } else {
-        // Set no rendezvous (anonymous mode)
-        config.Rendezvous = []string{}
+        cfg.Rendezvous = append(cfg.Rendezvous, node.P2PHash)
     }
-    node.Host, err = p2pnode.NewNode(ctx, config)
+    node.Host, err = p2pnode.NewNode(ctx, cfg)
     if err != nil {
         return node, err
     }
