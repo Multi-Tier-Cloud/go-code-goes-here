@@ -9,6 +9,8 @@ import (
     "os"
     "net/http"
 
+    "github.com/libp2p/go-libp2p-core/pnet"
+
     "github.com/multiformats/go-multiaddr"
 
     "github.com/Multi-Tier-Cloud/common/util"
@@ -32,10 +34,14 @@ func main () {
     configPath := flag.String("configfile", "../conf/conf.json", "path to config file to use")
     var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
+    var psk *pnet.PSK
     if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
         log.Fatalln(err)
     }
     if bootstraps, err = util.AddBootstrapFlags(); err != nil {
+        log.Fatalln(err)
+    }
+    if psk, err = util.AddPSKFlag(); err != nil {
         log.Fatalln(err)
     }
     flag.Parse()
@@ -94,9 +100,15 @@ func main () {
         }
     }
 
+    // Set node configuration
+    nodeConfig := p2pnode.NewConfig()
+    nodeConfig.PrivKey = priv
+    nodeConfig.BootstrapPeers = *bootstraps
+    nodeConfig.PSK = *psk
+
     // Spawn LCA Allocator
     log.Println("Spawning LCA Allocator")
-    _, err = lca.NewLCAAllocator(ctx, *bootstraps, priv)
+    _, err = lca.NewLCAAllocator(ctx, nodeConfig)
     if err != nil {
         panic(err)
     }

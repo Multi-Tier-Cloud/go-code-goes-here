@@ -13,6 +13,7 @@ import (
     "time"
 
     "github.com/libp2p/go-libp2p-core/peer"
+    "github.com/libp2p/go-libp2p-core/pnet"
 
     "github.com/multiformats/go-multiaddr"
 
@@ -188,10 +189,14 @@ func main() {
 
     var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
+    var psk *pnet.PSK
     if keyFlags, err = util.AddKeyFlags(defaultKeyFile); err != nil {
         log.Fatalln(err)
     }
     if bootstraps, err = util.AddBootstrapFlags(); err != nil {
+        log.Fatalln(err)
+    }
+    if psk, err = util.AddPSKFlag(); err != nil {
         log.Fatalln(err)
     }
     flag.Usage = customUsage // Do this only afer adding all flags
@@ -261,15 +266,21 @@ func main() {
         }
     }
 
+    // Set node configuration
+    nodeConfig := p2pnode.NewConfig()
+    nodeConfig.PrivKey = priv
+    nodeConfig.BootstrapPeers = *bootstraps
+    nodeConfig.PSK = *psk
+
     // Setup LCA Manager
     ctx := context.Background()
     if mode == "anonymous" {
         log.Println("Starting LCA Manager in anonymous mode")
-        manager, err = lca.NewLCAManager(ctx, "", "", *bootstraps, priv)
+        manager, err = lca.NewLCAManager(ctx, nodeConfig, "", "")
     } else {
         log.Println("Starting LCA Manager in service mode with arguments",
                     service, address)
-        manager, err = lca.NewLCAManager(ctx, service, address, *bootstraps, priv)
+        manager, err = lca.NewLCAManager(ctx, nodeConfig, service, address)
     }
 
     if err != nil {

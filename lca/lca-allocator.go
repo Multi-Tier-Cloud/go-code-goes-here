@@ -72,7 +72,7 @@ func LCAAllocatorHandler(stream network.Stream) {
             }
             proxyPort := strconv.Itoa(pp)
             servicePort := strconv.Itoa(sp)
-            cfg := docker_driver.Docker_config{
+            cfg := docker_driver.DockerConfig{
                 Image: imageName,
                 Network: "host",
                 Env: []string{
