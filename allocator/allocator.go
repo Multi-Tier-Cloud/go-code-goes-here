@@ -61,19 +61,18 @@ func main () {
     config := conf.Config{}
     configFile, err := os.Open(*configPath)
     if err != nil {
-        panic(err)
+        log.Fatalln(err)
     }
+    defer configFile.Close()
+
     configByte, err := ioutil.ReadAll(configFile)
     if err != nil {
-        configFile.Close()
-        panic(err)
+        log.Fatalln(err)
     }
     err = json.Unmarshal(configByte, &config)
     if err != nil {
-        configFile.Close()
-        panic(err)
+        log.Fatalln(err)
     }
-    configFile.Close()
 
     // If CLI didn't specify any bootstraps, fallback to configuration file.
     // If configuration file doesn't contain bootstraps, fallback to
@@ -110,7 +109,7 @@ func main () {
     log.Println("Spawning LCA Allocator")
     _, err = lca.NewLCAAllocator(ctx, nodeConfig)
     if err != nil {
-        panic(err)
+        log.Fatalln(err)
     }
 
     // Wait for connection

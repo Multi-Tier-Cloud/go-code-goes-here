@@ -6,6 +6,7 @@ import (
     "errors"
     "fmt"
     "regexp"
+    "runtime/debug"
     "strings"
     "log"
 
@@ -209,11 +210,20 @@ func pingService() error {
 func NewLCAManagerHandler(address string) func(network.Stream) {
     return func(stream network.Stream) {
         defer stream.Close()
+        defer func() {
+            // Don't crash the whole program if panic() called
+            // Print stack trace for debug info
+            if r := recover(); r != nil {
+                fmt.Printf("Stream handler for %s panic'd:\n%s\n",
+                    address, string(debug.Stack()))
+            }
+        }()
+
         log.Println("Got a new LCA Manager request")
         rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
         err := pingService()
         if err != nil {
-            rw.WriteString("Error\n")
+            _, err = rw.WriteString("Error\n")
             if err != nil {
                 log.Println("Error writing to buffer")
                 panic(err)
@@ -224,7 +234,7 @@ func NewLCAManagerHandler(address string) func(network.Stream) {
                 panic(err)
             }
         } else {
-            rw.WriteString(fmt.Sprintf("%s\n", address))
+            _, err = rw.WriteString(fmt.Sprintf("%s\n", address))
             if err != nil {
                 log.Println("Error writing to buffer")
                 panic(err)
