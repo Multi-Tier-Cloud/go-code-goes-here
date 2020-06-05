@@ -17,6 +17,7 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
+    "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
@@ -264,6 +265,16 @@ func main() {
                 log.Fatalln(err)
             }
         }
+    }
+
+    // If CLI didn't specify a PSK, check the environment variables
+    if *psk == nil {
+        envPsk, err := util.GetEnvPSK()
+        if err != nil {
+            log.Fatalln(err)
+        }
+
+        *psk = envPsk
     }
 
     // Set node configuration
