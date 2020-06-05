@@ -7,7 +7,7 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
+    "github.com/Multi-Tier-Cloud/common/util"
 )
 
 
@@ -23,7 +23,7 @@ var LCAAllocatorRendezvous string
 // Initialize defaults
 func init() {
     var err error
-    DefaultListenAddrs, err = p2pnode.StringsToMultiaddrs([]string{
+    DefaultListenAddrs, err = util.StringsToMultiaddrs([]string{
         "/ip4/0.0.0.0/tcp/4001",
     })
     if err != nil {
