@@ -16,7 +16,6 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
@@ -242,13 +241,23 @@ func main() {
 
     if len(*bootstraps) == 0 {
         if len(config.Bootstraps) == 0 {
-            log.Fatalln("ERROR: Must specify at least one bootstrap node" +
-                "through a command line flag or the configuration file")
-        }
+            envBootstraps, err := util.GetEnvBootstraps()
+            if err != nil {
+                log.Fatalln(err)
+            }
 
-        *bootstraps, err = p2pnode.StringsToMultiaddrs(config.Bootstraps)
-        if err != nil {
-            log.Fatalln(err)
+            if len(envBootstraps) == 0 {
+                log.Fatalf("ERROR: Must specify at least one bootstrap node " +
+                    "through a command line flag, the configuration file, or " +
+                    "setting the %s environment variable.", util.ENV_KEY_BOOTSTRAPS)
+            }
+
+            *bootstraps = envBootstraps
+        } else {
+            *bootstraps, err = util.StringsToMultiaddrs(config.Bootstraps)
+            if err != nil {
+                log.Fatalln(err)
+            }
         }
     }
 
