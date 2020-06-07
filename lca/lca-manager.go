@@ -5,6 +5,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     "regexp"
     "runtime/debug"
     "log"
@@ -57,7 +58,11 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
             rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
             str, err := read(rw)
             if err != nil {
-                log.Println("Error reading from buffer")
+                if err == io.EOF {
+                    log.Println("Error: Incoming stream unexpectedly closed")
+                }
+                log.Printf("Error reading from buffer: %v\n" +
+                    "Buffer contents received: %s\n", err, str)
                 return peer.ID(""), "", p2putil.PerfInd{}, err
             }
 
@@ -83,7 +88,11 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 
     str, err := read(rw)
     if err != nil {
-        log.Println("Error reading from buffer")
+        if err == io.EOF {
+            log.Println("Error: Incoming stream unexpectedly closed")
+        }
+        log.Printf("Error reading from buffer: %v\n" +
+            "Buffer contents received: %s\n", err, str)
         return "", err
     }
 

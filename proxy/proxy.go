@@ -128,7 +128,11 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         log.Println("Request to service returned an error:\n", err)
 
         // Propagate error code and message to client
-        http.Error(w, "Service error: " + resp.Status, resp.StatusCode)
+        if resp != nil {
+            http.Error(w, "Service error: " + resp.Status, resp.StatusCode)
+        } else {
+            http.Error(w, "Service error", http.StatusBadGateway)
+        }
         go cache.RemovePeer(id, serviceAddress)
         return
     }
