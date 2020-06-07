@@ -7,7 +7,6 @@ import (
     "fmt"
     "regexp"
     "runtime/debug"
-    "strings"
     "log"
 
     "github.com/libp2p/go-libp2p-core/network"
@@ -56,12 +55,11 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
         } else {
             defer stream.Reset()
             rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-            str, err := rw.ReadString('\n')
+            str, err := read(rw)
             if err != nil {
                 log.Println("Error reading from buffer")
                 return peer.ID(""), "", p2putil.PerfInd{}, err
             }
-            str = strings.TrimSuffix(str, "\n")
 
             stream.Close()
 
@@ -76,24 +74,18 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
 // Helper function to AllocService that handles the communication with LCA Allocator
 func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-    // Send command "start-program"
-    _, err := rw.WriteString(fmt.Sprintf("start-program %s\n", serviceHash))
+    // Send command Start Program"
+    err := write(rw, fmt.Sprintf("%s %s\n", LCAAPCmdStartProgram, serviceHash))
     if err != nil {
         log.Println("Error writing to buffer")
         return "", err
     }
-    err = rw.Flush()
-    if err != nil {
-        log.Println("Error flushing buffer")
-        return "", err
-    }
 
-    str, err := rw.ReadString('\n')
+    str, err := read(rw)
     if err != nil {
         log.Println("Error reading from buffer")
         return "", err
     }
-    str = strings.TrimSuffix(str, "\n")
 
     // Parse IP address and Port
     log.Println("New instance:", str)
@@ -223,25 +215,15 @@ func NewLCAManagerHandler(address string) func(network.Stream) {
         rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
         err := pingService()
         if err != nil {
-            _, err = rw.WriteString("Error\n")
+            err = write(rw, LCAPErrDeadProgram)
             if err != nil {
                 log.Println("Error writing to buffer")
-                panic(err)
-            }
-            err = rw.Flush()
-            if err != nil {
-                log.Println("Error flushing buffer")
                 panic(err)
             }
         } else {
-            _, err = rw.WriteString(fmt.Sprintf("%s\n", address))
+            err = write(rw, fmt.Sprintf("%s\n", address))
             if err != nil {
                 log.Println("Error writing to buffer")
-                panic(err)
-            }
-            err = rw.Flush()
-            if err != nil {
-                log.Println("Error flushing buffer")
                 panic(err)
             }
         }

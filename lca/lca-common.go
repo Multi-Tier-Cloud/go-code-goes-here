@@ -1,7 +1,9 @@
 package lca
 
 import (
+    "bufio"
     "log"
+    "strings"
 
     "github.com/libp2p/go-libp2p-core/protocol"
 
@@ -19,6 +21,17 @@ var LCAManagerProtocolID protocol.ID
 var LCAAllocatorProtocolID protocol.ID
 var LCAAllocatorRendezvous string
 
+// Commands
+const (
+    LCAAPCmdStartProgram = "start-program"
+)
+
+// Errors
+const (
+    LCAPErrUnrecognized = "Error: unrecognized command"
+    LCAPErrAllocFail = "Error: allocation failed"
+    LCAPErrDeadProgram = "Error: program non-responsive"
+)
 
 // Initialize defaults
 func init() {
@@ -39,3 +52,20 @@ func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
+func read(rw *bufio.ReadWriter) (string, error) {
+    str, err := rw.ReadString("\n")
+    if err != nil {
+        return "", err
+    }
+    str = strings.TrimSuffix(str, "\n")
+    return str, nil
+}
+
+func write(rw *bufio.ReadWriter, msg string) error {
+    _, err := rw.WriteString(msg + "\n")
+    if err != nil {
+        return err
+    }
+    rw.Flush()
+    return nil
+}

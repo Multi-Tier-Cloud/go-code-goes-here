@@ -6,7 +6,6 @@ import (
     "fmt"
     "regexp"
     "strconv"
-    "strings"
     "log"
 
     "github.com/libp2p/go-libp2p-core/network"
@@ -30,44 +29,53 @@ func LCAAllocatorHandler(stream network.Stream) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
 
     // Read request
-    str, err := rw.ReadString('\n')
+    str, err := read(rw)
     if err != nil {
         log.Println("Error reading from buffer\n", err)
         return
     }
-    str = strings.TrimSuffix(str, "\n")
 
     r := regexp.MustCompile("(.*?)\\s(.*?)$")
     match := r.FindStringSubmatch(str)
     // Respond to command
     switch match[1] {
-        case "start-program": {
+        case LCAAPCmdStartProgram: {
             imageName := match[2]
-            log.Println("Received command start-program, starting image:", imageName)
+            log.Println("Received command", match[1], "starting image:", match[2])
             _, err = docker_driver.PullImage(imageName)
             if err != nil {
                 log.Println("Error calling Docker PullImage()\n", err)
-                _, err2 := rw.WriteString("Error: could not pull image\n")
+                err2 := write(rw, LCAPErrAllocFail)
                 if err2 != nil {
                     log.Println("Error writing to buffer\n", err2)
-                    return
                 }
-                rw.Flush()
                 return
             }
             ipAddress, err := util.GetIPAddress()
             if err != nil {
                 log.Println("Error getting IP address\n", err)
+                err2 := write(rw, LCAPErrAllocFail)
+                if err2 != nil {
+                    log.Println("Error writing to buffer\n", err2)
+                }
                 return
             }
             pp, err := util.GetFreePort()
             if err != nil {
                 log.Println("Error getting free port for proxy\n", err)
+                err2 := write(rw, LCAPErrAllocFail)
+                if err2 != nil {
+                    log.Println("Error writing to buffer\n", err2)
+                }
                 return
             }
             sp, err := util.GetFreePort()
             if err != nil {
                 log.Println("Error getting free port for service\n", err)
+                err2 := write(rw, LCAPErrAllocFail)
+                if err2 != nil {
+                    log.Println("Error writing to buffer\n", err2)
+                }
                 return
             }
             proxyPort := strconv.Itoa(pp)
@@ -84,34 +92,22 @@ func LCAAllocatorHandler(stream network.Stream) {
             _, err = docker_driver.RunContainer(cfg)
             if err != nil {
                 log.Println("Error calling Docker RunContainer()\n", err)
-                _, err2 := rw.WriteString("Error: could not start process\n")
+                err2 := write(rw, LCAPErrAllocFail)
                 if err2 != nil {
                     log.Println("Error writing to buffer\n", err2)
-                    return
                 }
-                rw.Flush()
                 return
             }
-            _, err = rw.WriteString(fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
+            err = write(rw, fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
             if err != nil {
                 log.Println("Error writing to buffer\n", err)
-                return
-            }
-            err = rw.Flush()
-            if err != nil {
-                log.Println("Error flushing buffer\n", err)
                 return
             }
         }
         default: {
-            _, err = rw.WriteString("Error: unrecognized command\n")
+            err = write(rw, LCAPErrUnrecognized)
             if err != nil {
                 log.Println("Error writing to buffer\n", err)
-                return
-            }
-            err = rw.Flush()
-            if err != nil {
-                log.Println("Error flushing buffer\n", err)
                 return
             }
         }
