@@ -262,7 +262,7 @@ func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
     cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerProtocolID)
     if serviceName != "" {
         // Set rendezvous to service hash value
-        node.P2PHash, _, err = hashlookup.GetHash(serviceName)
+        node.P2PHash, _, err = hashlookup.GetHash(cfg.BootstrapPeers, cfg.PSK, serviceName)
         if err != nil {
             return node, err
         }
