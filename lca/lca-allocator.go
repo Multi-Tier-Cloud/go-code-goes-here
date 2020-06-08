@@ -23,7 +23,7 @@ type LCAAllocator struct {
 // Allocator Handler that takes care of accepting a connection
 // from an LCA Manager and allocating the requested service
 func LCAAllocatorHandler(stream network.Stream) {
-    defer stream.Reset()
+    defer stream.Close()
     log.Println("Got new LCA Allocator request")
     // Open communication channels
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
