@@ -53,7 +53,7 @@ func init() {
 }
 
 func read(rw *bufio.ReadWriter) (string, error) {
-    str, err := rw.ReadString("\n")
+    str, err := rw.ReadString('\n')
     if err != nil {
         return "", err
     }
