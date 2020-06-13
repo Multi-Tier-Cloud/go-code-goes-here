@@ -9,9 +9,13 @@ import (
 
 // UDP data forwarder
 func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
+    var err error
+    var nBytes, nBytesW, n int
     buf := make([]byte, 0xffff) // 64k buffer
     for {
-        nBytes, err := src.Read(buf)
+        nBytesW = 0
+
+        nBytes, err = src.Read(buf)
         if err != nil {
             if err == syscall.EINVAL {
                 log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
@@ -24,16 +28,20 @@ func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
         }
         data := buf[:nBytes]
 
-        nBytes, err = dst.WriteTo(data, dstAddr) // TODO: Ensure nBytes actually written
-        if err != nil {
-            if err == syscall.EINVAL {
-                log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
-                break
-            } else {
-                log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
-                    src.LocalAddr(), src.RemoteAddr(), err)
+        for nBytesW < nBytes {
+            n, err = dst.WriteTo(data, dstAddr)
+            if err != nil {
+                if err == syscall.EINVAL {
+                    log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
+                    break
+                } else {
+                    log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
+                        src.LocalAddr(), src.RemoteAddr(), err)
+                }
+                continue
             }
-            continue
+
+            nBytesW += n
         }
     }
 }
@@ -54,14 +62,16 @@ func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
     // Since there's no per-client UDP connection object, we'll need to do some
     // manual demultiplexing. Create a separate outgoing UDP "connection" to the
     // same target service per unique client.
-    client2RConn := make(map[net.Addr]*net.UDPConn)
+    client2RConn := make(map[string]*net.UDPConn)
 
     var rConn *net.UDPConn
     var exists bool
     var from net.Addr
-    var nBytes int
+    var nBytes, nBytesW, n int
     buf := make([]byte, 0xffff) // 64k buffer
     for {
+        nBytesW = 0
+
         nBytes, from, err = lConn.ReadFrom(buf)
         if err != nil {
             if err == syscall.EINVAL {
@@ -75,7 +85,9 @@ func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
         }
 
         // Create per-client connection with remote service
-        if rConn, exists = client2RConn[from]; !exists {
+        if rConn, exists = client2RConn[from.String()]; !exists {
+            log.Printf("New UDP conn: %s <=> %s\n", lConn.LocalAddr(), from)
+
             rConn, err = net.DialUDP("udp", nil, rAddr)
             if err != nil {
                 log.Printf("ERROR: Unable to dial UDP target address %s\n%v\n",
@@ -84,7 +96,7 @@ func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
             }
             defer rConn.Close()
 
-            client2RConn[from] = rConn
+            client2RConn[from.String()] = rConn
 
             // Create separate goroutine to handle reverse path
             go udpFwdData(rConn, lConn, from)
@@ -92,18 +104,21 @@ func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
 
         data := buf[:nBytes]
 
-        nBytes, err = rConn.Write(data)
-        if err != nil {
-            if err == syscall.EINVAL {
-                log.Printf("Connection %s <=> %s closed",
-                    rConn.LocalAddr(), rConn.RemoteAddr())
-            } else {
-                log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
-                    rConn.LocalAddr(), rConn.RemoteAddr(), err)
+        for nBytesW < nBytes {
+            n, err = rConn.Write(data)
+            if err != nil {
+                if err == syscall.EINVAL {
+                    log.Printf("Connection %s <=> %s closed",
+                        rConn.LocalAddr(), rConn.RemoteAddr())
+                } else {
+                    log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
+                        rConn.LocalAddr(), rConn.RemoteAddr(), err)
+                }
+                continue
             }
-            continue
-        }
 
+            nBytesW += n
+        }
     }
 }
 
