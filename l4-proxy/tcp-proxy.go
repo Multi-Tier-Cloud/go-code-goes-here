@@ -2,7 +2,6 @@ package main
 
 import (
     "fmt"
-    "io"
     "log"
     "net"
     "syscall"
@@ -21,9 +20,7 @@ func tcpFwdData(src, dst net.Conn) {
         //       Not clear why right now. Thus, do the copy manually.
         nBytes, err = src.Read(buf)
         if err != nil {
-            if err != io.EOF {
-                log.Printf("ERROR: Unable to read from connection %s\n%v\n", src, err)
-            }
+            log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
             return
         }
         data := buf[:nBytes]
@@ -31,9 +28,7 @@ func tcpFwdData(src, dst net.Conn) {
         for nBytesW < nBytes {
             n, err = dst.Write(data)
             if err != nil {
-                if err != io.EOF {
-                    fmt.Printf("ERROR: Unable to write to connection %s\n%v\n", dst, err)
-                }
+                log.Printf("Connection %s <=> %s closed", dst.LocalAddr(), dst.RemoteAddr())
                 return
             }
 
@@ -97,20 +92,21 @@ func tcpServiceProxy(listen net.Listener, targetAddr string) {
 // Returns a string of the new TCP listening endpoint address
 func openTCPProxy(serviceAddr string) (string, error) {
     var listenAddr string
-    if _, exists := serv2Fwd[serviceAddr]; !exists {
+    serviceKey := "tcp://" + serviceAddr
+    if _, exists := serv2Fwd[serviceKey]; !exists {
         listen, err := net.Listen("tcp", ctrlHost + ":") // automatically choose port
         if err != nil {
             return "", fmt.Errorf("Unable to open TCP listening port\n")
         }
 
         listenAddr = listen.Addr().String()
-        serv2Fwd[serviceAddr] = Forwarder {
+        serv2Fwd[serviceKey] = Forwarder {
             ListenAddr: listenAddr,
             tcpWorker: tcpServiceProxy,
         }
-        go serv2Fwd[serviceAddr].tcpWorker(listen, serviceAddr)
+        go serv2Fwd[serviceKey].tcpWorker(listen, serviceAddr)
     } else {
-        listenAddr = serv2Fwd[serviceAddr].ListenAddr
+        listenAddr = serv2Fwd[serviceKey].ListenAddr
     }
 
     return listenAddr, nil
