@@ -11,11 +11,15 @@ import (
 // TCP data forwarder
 // Simplified version of pipe() from https://github.com/jpillora/go-tcp-proxy/blob/master/proxy.go
 func tcpFwdData(src, dst net.Conn) {
+    var err error
+    var nBytes, nBytesW, n int
     buf := make([]byte, 0xffff) // 64k buffer
     for {
+        nBytesW = 0
+
         // NOTE: Using io.Copy or io.CopyBuffer slows down *a lot* after 2-3 runs.
         //       Not clear why right now. Thus, do the copy manually.
-        nBytes, err := src.Read(buf)
+        nBytes, err = src.Read(buf)
         if err != nil {
             if err != io.EOF {
                 log.Printf("ERROR: Unable to read from connection %s\n%v\n", src, err)
@@ -24,12 +28,16 @@ func tcpFwdData(src, dst net.Conn) {
         }
         data := buf[:nBytes]
 
-        nBytes, err = dst.Write(data) // TODO: Ensure nBytes is written
-        if err != nil {
-            if err != io.EOF {
-                fmt.Printf("ERROR: Unable to write to connection %s\n%v\n", dst, err)
+        for nBytesW < nBytes {
+            n, err = dst.Write(data)
+            if err != nil {
+                if err != io.EOF {
+                    fmt.Printf("ERROR: Unable to write to connection %s\n%v\n", dst, err)
+                }
+                return
             }
-            return
+
+            nBytesW += n
         }
     }
 }
