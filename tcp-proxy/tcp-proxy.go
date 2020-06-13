@@ -12,6 +12,7 @@ import (
     "net/http"
     "os"
     "strings"
+    "syscall"
     "time"
 
     "github.com/libp2p/go-libp2p-core/peer"
@@ -36,6 +37,10 @@ func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
+// HTTP listening endpoint for control messages
+// TODO: Make this configurable? i.e. proxy available to non-localhost?
+var ctrlHost = "127.0.0.1" // Port will be passed via CLI
+
 // Global LCA Manager instance to handle peer search and allocation
 var manager lca.LCAManager
 
@@ -46,7 +51,8 @@ var cache pcache.PeerCache
 type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
-    fWorker     func(net.Listener, string)
+    tcpWorker   func(net.Listener, string)
+    udpWorker   func(*net.UDPConn, string)
 }
 
 // Maps a remote addr to existing ServiceProxy for that addr
@@ -57,6 +63,8 @@ var serv2Fwd = make(map[string]Forwarder)
 func fwdData(src, dst net.Conn) {
     buf := make([]byte, 0xffff) // 64k buffer
     for {
+        // NOTE: Using io.Copy or io.CopyBuffer slows down *a lot* after 2-3 runs.
+        //       Not clear why right now. Thus, do the copy manually.
         nBytes, err := src.Read(buf)
         if err != nil {
             if err != io.EOF {
@@ -66,7 +74,7 @@ func fwdData(src, dst net.Conn) {
         }
         data := buf[:nBytes]
 
-        nBytes, err = dst.Write(data)
+        nBytes, err = dst.Write(data) // TODO: Ensure nBytes is written
         if err != nil {
             if err != io.EOF {
                 fmt.Printf("ERROR: Unable to write to connection %s\n", dst)
@@ -84,13 +92,13 @@ func fwdLocalConn(lConn net.Conn, targetAddr string) {
     // Resolve and open connection to destination service
     rAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
     if err != nil {
-        log.Printf("ERROR: Unable to resolve target address %s\n", targetAddr)
+        log.Printf("ERROR: Unable to resolve target address %s\n%v\n", targetAddr, err)
         return
     }
 
     rConn, err := net.DialTCP("tcp", nil, rAddr)
     if err != nil {
-        log.Printf("ERROR: Unable to dial target address %s\n", targetAddr)
+        log.Printf("ERROR: Unable to dial target address %s\n%v\n", targetAddr, err)
         return
     }
     defer rConn.Close()
@@ -101,12 +109,16 @@ func fwdLocalConn(lConn net.Conn, targetAddr string) {
 }
 
 // Implementation of ServiceProxy
-func serviceProxy(listen net.Listener, targetAddr string) {
+func tcpServiceProxy(listen net.Listener, targetAddr string) {
     defer listen.Close()
 
     for {
         conn, err := listen.Accept()
         if err != nil {
+            if err == syscall.EINVAL {
+                log.Printf("Listener (%s) closed", listen.Addr())
+                break
+            }
             log.Printf("Listener (%s) unable to accept connection\n%v\n", listen.Addr(), err)
             continue
         }
@@ -116,6 +128,162 @@ func serviceProxy(listen net.Listener, targetAddr string) {
     }
 }
 
+// UDP data forwarder
+func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
+    buf := make([]byte, 0xffff) // 64k buffer
+    for {
+        nBytes, err := src.Read(buf)
+        if err != nil {
+            if err == syscall.EINVAL {
+                log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
+                break
+            } else {
+                log.Printf("ERROR: Unable to read from UDP connection %s <=> %s\n%v\n",
+                    src.LocalAddr(), src.RemoteAddr(), err)
+            }
+            continue
+        }
+        data := buf[:nBytes]
+
+        nBytes, err = dst.WriteTo(data, dstAddr) // TODO: Ensure nBytes actually written
+        if err != nil {
+            if err == syscall.EINVAL {
+                log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
+                break
+            } else {
+                log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
+                    src.LocalAddr(), src.RemoteAddr(), err)
+            }
+            continue
+        }
+    }
+}
+
+// Demultiplex incoming packets and forward them to destination
+func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
+    defer lConn.Close()
+
+    var err error
+
+    // Resolve and open connection to destination service
+    rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+    if err != nil {
+        log.Printf("ERROR: Unable to resolve UDP target address %s\n%v\n", targetAddr, err)
+        return
+    }
+
+    // Since there's no per-client UDP connection object, we'll need to do some
+    // manual demultiplexing. Create a separate outgoing UDP "connection" to the
+    // same target service per unique client.
+    client2RConn := make(map[net.Addr]*net.UDPConn)
+
+    var rConn *net.UDPConn
+    var exists bool
+    var from net.Addr
+    var nBytes int
+    buf := make([]byte, 0xffff) // 64k buffer
+    for {
+        nBytes, from, err = lConn.ReadFrom(buf)
+        if err != nil {
+            if err == syscall.EINVAL {
+                log.Printf("Connection %s <=> %s closed",
+                    lConn.LocalAddr(), lConn.RemoteAddr())
+            } else {
+                log.Printf("ERROR: Unable to read from UDP connection %s <=> %s\n%v\n",
+                    lConn.LocalAddr(), lConn.RemoteAddr(), err)
+            }
+            return
+        }
+
+        // Create per-client connection with remote service
+        if rConn, exists = client2RConn[from]; !exists {
+            rConn, err = net.DialUDP("udp", nil, rAddr)
+            if err != nil {
+                log.Printf("ERROR: Unable to dial UDP target address %s\n%v\n",
+                    targetAddr, err)
+                continue // Or return? Other connections may be okay...
+            }
+            defer rConn.Close()
+
+            client2RConn[from] = rConn
+
+            // Create separate goroutine to handle reverse path
+            go udpFwdData(rConn, lConn, from)
+        }
+
+        data := buf[:nBytes]
+
+        nBytes, err = rConn.Write(data)
+        if err != nil {
+            if err == syscall.EINVAL {
+                log.Printf("Connection %s <=> %s closed",
+                    rConn.LocalAddr(), rConn.RemoteAddr())
+            } else {
+                log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
+                    rConn.LocalAddr(), rConn.RemoteAddr(), err)
+            }
+            continue
+        }
+
+    }
+}
+
+// Open TCP tunnel to service and open local TCP listening port
+// NOTE: Currently doesn't support SSL/TLS
+//
+// TODO: In the future, perhaps the connection type info (TCP/UDP) can be stored in hash-lookup?
+// TODO: In the future, move towards proxy-to-proxy implementation
+//       This may be useful? https://github.com/libp2p/go-libp2p-gostream
+// Start separate goroutine for handling connections and proxying to service
+//
+// Returns a string of the new TCP listening endpoint address
+func openTCPProxy(serviceAddr string) (string, error) {
+    var listenAddr string
+    if _, exists := serv2Fwd[serviceAddr]; !exists {
+        listen, err := net.Listen("tcp", ctrlHost + ":") // automatically choose port
+        if err != nil {
+            return "", fmt.Errorf("Unable to open TCP listening port\n")
+        }
+
+        listenAddr = listen.Addr().String()
+        serv2Fwd[serviceAddr] = Forwarder {
+            ListenAddr: listenAddr,
+            tcpWorker: tcpServiceProxy,
+        }
+        go serv2Fwd[serviceAddr].tcpWorker(listen, serviceAddr)
+    } else {
+        listenAddr = serv2Fwd[serviceAddr].ListenAddr
+    }
+
+    return listenAddr, nil
+}
+
+// Open UDP tunnel to service and open local UDP listening port
+func openUDPProxy(serviceAddr string) (string, error) {
+    var listenAddr string
+    if _, exists := serv2Fwd[serviceAddr]; !exists {
+        udpAddr, err := net.ResolveUDPAddr("udp", ctrlHost + ":") // choose port
+        if err != nil {
+            return "", fmt.Errorf("Unable to resolve UDP address\n%w\n", err)
+        }
+
+        conn, err := net.ListenUDP("udp", udpAddr)
+        if err != nil {
+            return "", fmt.Errorf("Unable to open UDP listening port\n")
+        }
+
+        listenAddr = conn.LocalAddr().String()
+        serv2Fwd[serviceAddr] = Forwarder {
+            ListenAddr: listenAddr,
+            udpWorker: udpServiceProxy,
+        }
+        go serv2Fwd[serviceAddr].udpWorker(conn, serviceAddr)
+    } else {
+        listenAddr = serv2Fwd[serviceAddr].ListenAddr
+    }
+
+    return listenAddr, nil
+}
 
 // Handles the "proxying" part of proxy
 // TODO: Refactor this function
@@ -124,10 +292,38 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 
     // 1. Find service information and arguments from URL
     // URL.RequestURI() includes path?query (URL.Path only has the path)
-    tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
-    log.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
-    serviceName := tokens[1]
+    tokens := strings.Split(r.URL.RequestURI(), "/")
+
+    if len(tokens) < 3 {
+        http.Error(w, "Bad Request", http.StatusBadRequest)
+        fmt.Fprintf(w, "Error: Incorrect API usage, expecting a protocol " +
+            "('tcp' or 'udp') and a service name.\n" +
+            "e.g. http://%s/tcp/name-of-service\n", ctrlHost)
+        log.Printf("ERROR: Incorrect number of arguments in HTTP URI\n")
+        return
+    }
+
+    tpProto := tokens[1]
+    switch tpProto {
+    case "udp", "tcp": // do nothing
+    default:
+        http.Error(w, "Bad Request", http.StatusBadRequest)
+        fmt.Fprintf(w, "Error: Expecting protocol to be either 'tcp' or 'udp'\n")
+        return
+    }
+
+    serviceName := tokens[2]
+    log.Printf("Requested protocol is: %s\n", tpProto)
+    log.Printf("Requested service is: %s\n", serviceName)
+
+    // check if arguments exist
+    var arguments []string
+    if len(tokens) > 3 {
+        arguments = tokens[3:]
+        log.Printf("Parsed arguments are: %s\n", arguments)
+    }
+
     log.Println("Looking for service with name", serviceName, "in hash-lookup")
     serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
         manager.Host.Ctx, manager.Host.Host,
@@ -139,14 +335,6 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         log.Printf("ERROR: Hash lookup failed\n%s\n", err)
         return
     }
-
-    var arguments []string
-    // check if arguments exist
-    if len(tokens) == 3 {
-        arguments = tokens[2:]
-        fmt.Printf("parsed arguments are: %s\n", arguments)
-    }
-
     var id peer.ID
     var serviceAddress string
 
@@ -199,48 +387,24 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Open TCP tunnel to service and open local TCP listening port
-    // NOTE: Currently doesn't support SSL/TLS
-    //
-    // TODO: In the future, perhaps the connection type info (TCP/UDP) can be stored in hash-lookup?
-    // TODO: In the future, move towards proxy-to-proxy implementation
-    //       This may be useful? https://github.com/libp2p/go-libp2p-gostream
+    // Open TCP/UDP tunnel to service and open local TCP listening port
     // Start separate goroutine for handling connections and proxying to service
     var listenAddr string
-    if _, exists := serv2Fwd[serviceAddress]; !exists {
-        listen, err := net.Listen("tcp", "127.0.0.1:") // automatically choose port
-        if err != nil {
-            http.Error(w, "Unable to open listening port", http.StatusInternalServerError)
-            return
-        }
-
-        listenAddr = listen.Addr().String()
-        serv2Fwd[serviceAddress] = Forwarder {
-            ListenAddr: listenAddr,
-            fWorker: serviceProxy,
-        }
-        go serv2Fwd[serviceAddress].fWorker(listen, serviceAddress)
+    if tpProto == "tcp" {
+        listenAddr, err = openTCPProxy(serviceAddress)
+    } else if tpProto == "udp" {
+        listenAddr, err = openUDPProxy(serviceAddress)
     } else {
-        listenAddr = serv2Fwd[serviceAddress].ListenAddr
+        // Should not get here
+        http.Error(w, "Unknown transport protocol", http.StatusInternalServerError)
+        log.Printf("ERROR: Should not get here; Unknown transport protocol: %s\n", tpProto)
+        return
     }
-
-
-    //request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-    //log.Println("Running request:", request)
-    //resp, err := http.Get(request)
-    //if err != nil {
-    //    log.Println("Request to service returned an error:\n", err)
-
-    //    // Propagate error code and message to client
-    //    if resp != nil {
-    //        http.Error(w, "Service error: " + resp.Status, resp.StatusCode)
-    //    } else {
-    //        http.Error(w, "Service error", http.StatusBadGateway)
-    //    }
-    //    go cache.RemovePeer(id, serviceAddress)
-    //    return
-    //}
-    //defer resp.Body.Close()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        log.Printf("ERROR: %s\n", err.Error())
+        return
+    }
 
     // Return result
     // This returns errors as well
@@ -419,7 +583,7 @@ func main() {
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
-    log.Println("Starting HTTP Proxy on 127.0.0.1:" + port)
+    log.Println("Starting HTTP control endpoint on:", ctrlHost + ":" + port)
     http.HandleFunc("/", requestHandler)
-    log.Fatal(http.ListenAndServe("127.0.0.1:" + port, nil))
+    log.Fatal(http.ListenAndServe(ctrlHost + ":" + port, nil))
 }
