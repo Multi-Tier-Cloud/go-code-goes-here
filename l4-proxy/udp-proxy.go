@@ -8,6 +8,9 @@ import (
 )
 
 // UDP data forwarder
+// TODO: This function currently doesn't seem to end... the I/O functions do not
+//       appear to be returning errors. May need some way to timeout the
+//       connections so they don't keep consuming memory.
 func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
     var err error
     var nBytes, nBytesW, n int
@@ -24,7 +27,7 @@ func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
                 log.Printf("ERROR: Unable to read from UDP connection %s <=> %s\n%v\n",
                     src.LocalAddr(), src.RemoteAddr(), err)
             }
-            continue
+            return
         }
         data := buf[:nBytes]
 
@@ -32,13 +35,13 @@ func udpFwdData(src, dst *net.UDPConn, dstAddr net.Addr) {
             n, err = dst.WriteTo(data, dstAddr)
             if err != nil {
                 if err == syscall.EINVAL {
-                    log.Printf("Connection %s <=> %s closed", src.LocalAddr(), src.RemoteAddr())
+                    log.Printf("Connection %s <=> %s closed", dst.LocalAddr(), dst.RemoteAddr())
                     break
                 } else {
                     log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
-                        src.LocalAddr(), src.RemoteAddr(), err)
+                        dst.LocalAddr(), dst.RemoteAddr(), err)
                 }
-                continue
+                return
             }
 
             nBytesW += n
@@ -126,7 +129,8 @@ func udpServiceProxy(lConn *net.UDPConn, targetAddr string) {
 // Open UDP tunnel to service and open local UDP listening port
 func openUDPProxy(serviceAddr string) (string, error) {
     var listenAddr string
-    if _, exists := serv2Fwd[serviceAddr]; !exists {
+    serviceKey := "udp://" + serviceAddr
+    if _, exists := serv2Fwd[serviceKey]; !exists {
         udpAddr, err := net.ResolveUDPAddr("udp", ctrlHost + ":") // choose port
         if err != nil {
             return "", fmt.Errorf("Unable to resolve UDP address\n%w\n", err)
@@ -138,13 +142,13 @@ func openUDPProxy(serviceAddr string) (string, error) {
         }
 
         listenAddr = conn.LocalAddr().String()
-        serv2Fwd[serviceAddr] = Forwarder {
+        serv2Fwd[serviceKey] = Forwarder {
             ListenAddr: listenAddr,
             udpWorker: udpServiceProxy,
         }
-        go serv2Fwd[serviceAddr].udpWorker(conn, serviceAddr)
+        go serv2Fwd[serviceKey].udpWorker(conn, serviceAddr)
     } else {
-        listenAddr = serv2Fwd[serviceAddr].ListenAddr
+        listenAddr = serv2Fwd[serviceKey].ListenAddr
     }
 
     return listenAddr, nil
