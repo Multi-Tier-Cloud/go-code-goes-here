@@ -2,6 +2,7 @@ package lca
 
 import (
     "bufio"
+    _ "errors"
     "log"
     "strings"
 
@@ -14,12 +15,15 @@ import (
 
 
 // Useful defaults
-var DefaultListenAddrs []multiaddr.Multiaddr
+var (
+    DefaultListenAddrs []multiaddr.Multiaddr
 
-var LCAManagerProtocolID protocol.ID
+    LCAManagerFindProtID protocol.ID
+    LCAManagerRequestProtID protocol.ID
 
-var LCAAllocatorProtocolID protocol.ID
-var LCAAllocatorRendezvous string
+    LCAAllocatorProtocolID protocol.ID
+    LCAAllocatorRendezvous string
+)
 
 // Commands
 const (
@@ -28,6 +32,8 @@ const (
 
 // Errors
 const (
+    LCASErrWriteFail = "Error: writing to buffer"
+    LCASErrReadFail = "Error: reading from buffer"
     LCAPErrUnrecognized = "Error: unrecognized command"
     LCAPErrAllocFail = "Error: allocation failed"
     LCAPErrDeadProgram = "Error: program non-responsive"
@@ -43,22 +49,14 @@ func init() {
         panic(err)
     }
 
-    LCAManagerProtocolID = protocol.ID("/LCAManager/1.0")
+    LCAManagerFindProtID = protocol.ID("/LCAManagerFind/1.0")
+    LCAManagerRequestProtID = protocol.ID("/LCAManagerRequest/1.0")
 
     LCAAllocatorProtocolID = protocol.ID("/LCAAllocator/1.0")
     LCAAllocatorRendezvous = "QmQJRHSU69L6W2SwNiKekpUHbxHPXi57tWGRWJaD5NsRxS"
 
     // Set up logging defaults
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
-}
-
-func read(rw *bufio.ReadWriter) (string, error) {
-    str, err := rw.ReadString('\n')
-    if err != nil {
-        return "", err
-    }
-    str = strings.TrimSuffix(str, "\n")
-    return str, nil
 }
 
 func write(rw *bufio.ReadWriter, msg string) error {
@@ -68,4 +66,13 @@ func write(rw *bufio.ReadWriter, msg string) error {
     }
     rw.Flush()
     return nil
+}
+
+func read(rw *bufio.ReadWriter) (string, error) {
+    str, err := rw.ReadString('\n')
+    if err != nil {
+        return "", err
+    }
+    str = strings.TrimSuffix(str, "\n")
+    return str, nil
 }

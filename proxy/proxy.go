@@ -3,6 +3,7 @@ package main
 import (
     "context"
     "encoding/json"
+    "errors"
     "flag"
     "fmt"
     "io/ioutil"
@@ -40,34 +41,7 @@ var manager lca.LCAManager
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
 
-// Handles the "proxying" part of proxy
-// TODO: Refactor this function
-func requestHandler(w http.ResponseWriter, r *http.Request) {
-    log.Println("Got request:", r.URL.RequestURI()[1:])
-
-    // 1. Find service information and arguments from URL
-    // URL.RequestURI() includes path?query (URL.Path only has the path)
-    tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
-    log.Println(tokens)
-    // tokens[0] should be an empty string from parsing the initial "/"
-    serviceName := tokens[1]
-    log.Println("Looking for service with name", serviceName, "in hash-lookup")
-    serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
-        manager.Host.Ctx, manager.Host.Host,
-        manager.Host.RoutingDiscovery, serviceName,
-    )
-    if err != nil {
-        http.Error(w, "404 Not Found", http.StatusNotFound)
-        fmt.Fprintf(w, "%s\n", err)
-        log.Printf("ERROR: Hash lookup failed\n%s\n", err)
-        return
-    }
-    arguments := ""
-    // check if arguments exist
-    if len(tokens) == 3 {
-        arguments = tokens[2]
-    }
-
+func runRequest(serviceHash, dockerHash, arguments string) (*http.Response, error) {
     var id peer.ID
     var serviceAddress string
 
@@ -80,7 +54,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
             time.Sleep(5 * time.Second)
         }
 
-        id, serviceAddress, err = cache.GetPeer(serviceHash)
+        id, serviceAddress, err := cache.GetPeer(serviceHash)
         log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
         if err != nil {
             // If does not exist, use libp2p connection to find/create service
@@ -116,14 +90,51 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     if serviceAddress == "" || id == peer.ID("") {
-        http.NotFound(w, r)
+        return nil, errors.New("Not found")
+    }
+    request := arguments
+    log.Println("Running request:", request)
+    resp, err := manager.Request(id, request)
+    if err != nil {
+        go cache.RemovePeer(id, serviceAddress)
+    }
+
+    return resp, err
+}
+
+// Handles the "proxying" part of proxy
+// TODO: Refactor this function
+func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
+    log.Println("Got request:", r.URL.RequestURI()[1:])
+
+    // 1. Find service information and arguments from URL
+    // URL.RequestURI() includes path?query (URL.Path only has the path)
+    tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
+    log.Println(tokens)
+    // tokens[0] should be an empty string from parsing the initial "/"
+    serviceName := tokens[1]
+    log.Println("Looking for service with name", serviceName, "in hash-lookup")
+    serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
+        manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, serviceName,
+    )
+    if err != nil {
+        http.Error(w, "404 Not Found", http.StatusNotFound)
+        fmt.Fprintf(w, "%s\n", err)
+        log.Printf("ERROR: Hash lookup failed\n%s\n", err)
         return
+    }
+    arguments := ""
+    // check if arguments exist
+    if len(tokens) == 3 {
+        arguments = tokens[2]
     }
 
     // Run request
-    request := fmt.Sprintf("http://%s/%s", serviceAddress, arguments)
-    log.Println("Running request:", request)
-    resp, err := http.Get(request)
+    resp, err := runRequest(serviceHash, dockerHash, arguments)
+    if resp != nil {
+        defer resp.Body.Close()
+    }
     if err != nil {
         log.Println("Request to service returned an error:\n", err)
 
@@ -133,10 +144,8 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         } else {
             http.Error(w, "Service error", http.StatusBadGateway)
         }
-        go cache.RemovePeer(id, serviceAddress)
         return
     }
-    defer resp.Body.Close()
 
     // Return result
     // This returns errors as well
@@ -317,6 +326,6 @@ func main() {
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
     log.Println("Starting HTTP Proxy on 127.0.0.1:" + port)
-    http.HandleFunc("/", requestHandler)
+    http.HandleFunc("/", httpRequestHandler)
     log.Fatal(http.ListenAndServe("127.0.0.1:" + port, nil))
 }
