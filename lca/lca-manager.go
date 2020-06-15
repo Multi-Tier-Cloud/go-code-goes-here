@@ -192,7 +192,7 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
 }
 
 // TODO: Finish this function
-func (lca *LCAManager) Request(pid peer.ID, request string) (*http.Response, error) {
+func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, error) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
     defer cancel()
@@ -204,15 +204,13 @@ func (lca *LCAManager) Request(pid peer.ID, request string) (*http.Response, err
     }
     defer stream.Reset()
     r := bufio.NewReader(stream)
-    w := bufio.NewWriter(stream)
-    rw := bufio.NewReadWriter(r, w)
 
-    err = write(rw, request)
+    err = req.Write(stream)
     if err != nil {
         return nil, errors.New(LCASErrWriteFail)
     }
 
-    resp, err := http.ReadResponse(r, nil)
+    resp, err := http.ReadResponse(r, req)
     if resp != nil {
         defer resp.Body.Close()
     }
