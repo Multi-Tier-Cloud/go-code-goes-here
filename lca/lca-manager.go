@@ -211,10 +211,10 @@ func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, 
     }
 
     resp, err := http.ReadResponse(r, req)
-    if resp != nil {
-        defer resp.Body.Close()
-    }
     if err != nil {
+        if resp != nil {
+            resp.Body.Close()
+        }
         return nil, errors.New("Error: could not receive response")
     }
 
