@@ -6,6 +6,7 @@ import (
     "errors"
     "flag"
     "fmt"
+    "io"
     "io/ioutil"
     "log"
     "net/http"
@@ -41,7 +42,9 @@ var manager lca.LCAManager
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
 
-func runRequest(serviceHash, dockerHash, arguments string) (*http.Response, error) {
+func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Response, error) {
+    var err error
+
     var id peer.ID
     var serviceAddress string
 
@@ -54,8 +57,10 @@ func runRequest(serviceHash, dockerHash, arguments string) (*http.Response, erro
             time.Sleep(5 * time.Second)
         }
 
-        id, serviceAddress, err := cache.GetPeer(serviceHash)
-        log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
+        // When := was used here for some reason, id and serviceAddress were getting shadowed
+        // even without the predeclaration of err
+        id, serviceAddress, err = cache.GetPeer(serviceHash)
+        log.Printf("Get peer returned ID %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
         if err != nil {
             // If does not exist, use libp2p connection to find/create service
             log.Println("Finding best existing service instance")
@@ -89,12 +94,12 @@ func runRequest(serviceHash, dockerHash, arguments string) (*http.Response, erro
         }
     }
 
+    log.Printf("Running request to peer ID %s, serviceAddr %s\n",
+               id, serviceAddress)
     if serviceAddress == "" || id == peer.ID("") {
         return nil, errors.New("Not found")
     }
-    request := arguments
-    log.Println("Running request:", request)
-    resp, err := manager.Request(id, request)
+    resp, err := manager.Request(id, req)
     if err != nil {
         go cache.RemovePeer(id, serviceAddress)
     }
@@ -107,7 +112,6 @@ func runRequest(serviceHash, dockerHash, arguments string) (*http.Response, erro
 func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println("Got request:", r.URL.RequestURI()[1:])
 
-    // 1. Find service information and arguments from URL
     // URL.RequestURI() includes path?query (URL.Path only has the path)
     tokens := strings.SplitN(r.URL.RequestURI(), "/", 3)
     log.Println(tokens)
@@ -124,14 +128,9 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
         log.Printf("ERROR: Hash lookup failed\n%s\n", err)
         return
     }
-    arguments := ""
-    // check if arguments exist
-    if len(tokens) == 3 {
-        arguments = tokens[2]
-    }
 
     // Run request
-    resp, err := runRequest(serviceHash, dockerHash, arguments)
+    resp, err := runRequest(serviceHash, dockerHash, r)
     if resp != nil {
         defer resp.Body.Close()
     }
@@ -152,8 +151,15 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     // Ideally this would find another instance if there is an error
     // but just keep this behaviour for now
     log.Println("Sending response back to requester")
-    body, err := ioutil.ReadAll(resp.Body)
-    fmt.Fprintf(w, string(body))
+	// Copy any headers
+	for k, v := range resp.Header {
+		for _, s := range v {
+			w.Header().Add(k, s)
+		}
+	}
+    w.WriteHeader(resp.StatusCode)
+    // Copy body
+    io.Copy(w, resp.Body)
     return
 }
 
