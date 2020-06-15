@@ -9,6 +9,7 @@ import (
     "net/http"
     "regexp"
     "runtime/debug"
+    "strings"
     "log"
 
     "github.com/libp2p/go-libp2p-core/network"
@@ -196,7 +197,6 @@ func (lca *LCAManager) Request(pid peer.ID, request string) (*http.Response, err
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
     defer cancel()
 
-    // Request allocation until one succeeds then return allocated service address
     log.Println("Attempting to contact peer with pid:", pid)
     stream, err := lca.Host.Host.NewStream(ctx, pid, LCAManagerRequestProtID)
     if err != nil {
@@ -239,7 +239,7 @@ func FindServiceHandler(address string) func(network.Stream) {
             }
         }()
 
-        log.Println("Got a new LCA Manager request")
+        log.Println("Got a new LCA Manager Find request")
         rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
         err := pingService()
         if err != nil {
@@ -275,7 +275,7 @@ func RequestHandler(address string) func(network.Stream) {
             }
         }()
 
-        log.Println("Got a new LCA Manager request")
+        log.Println("Got a new LCA Manager Request request")
         r := bufio.NewReader(stream)
         w := bufio.NewWriter(stream)
         rw := bufio.NewReadWriter(r, w)
@@ -288,22 +288,31 @@ func RequestHandler(address string) func(network.Stream) {
             }
         }
 
-        str, err := read(rw)
+        req, err := http.ReadRequest(r)
+        if req != nil {
+            defer req.Body.Close()
+        }
         if err != nil {
             if err == io.EOF {
                 log.Println("Error: Incoming stream unexpectedly closed")
             }
-            log.Printf("Error reading from buffer: %v\n" +
-                "Buffer contents received: %s\n", err, str)
-             panic(err)
+            log.Printf("Error reading from buffer\n")
+            panic(err)
         }
 
-        request := fmt.Sprintf("http://%s/%s", address, str)
-        resp, err := http.Get(request)
-        if resp != nil {
-            resp.Body.Close()
+        // URL.RequestURI() includes path?query (URL.Path only has the path)
+        tokens := strings.SplitN(req.URL.RequestURI(), "/", 3)
+        log.Println(tokens)
+        // tokens[0] should be an empty string from parsing the initial "/"
+        arguments := ""
+        // check if arguments exist
+        if len(tokens) == 3 {
+            arguments = tokens[2]
         }
+
+        req.URL, err = req.URL.Parse(fmt.Sprintf("http://%s/%s", address, arguments))
         if err != nil {
+            log.Println("Error: invalid constructed URL from arguments")
             err = write(rw, LCAPErrDeadProgram)
             if err != nil {
                 log.Println("Error writing to buffer")
@@ -311,7 +320,26 @@ func RequestHandler(address string) func(network.Stream) {
             }
         }
 
-        resp.Write(w)
+        log.Println("Proxying request to service, request", req.URL)
+        outreq := new(http.Request)
+        *outreq = *req
+        resp, err := http.DefaultTransport.RoundTrip(outreq)
+        if resp != nil {
+            defer resp.Body.Close()
+        }
+        if err != nil {
+            log.Println("Error: invalid response from server")
+            err = write(rw, LCAPErrDeadProgram)
+            if err != nil {
+                log.Println("Error writing to buffer")
+                panic(err)
+            }
+        }
+
+        err = resp.Write(stream)
+        if err != nil {
+            panic(err)
+        }
     }
 }
 
