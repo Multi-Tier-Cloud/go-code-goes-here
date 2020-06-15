@@ -101,24 +101,30 @@ func main () {
     }
 
     // If CLI didn't specify a PSK, check the environment variables
+    // Also retrieve the original PSK passphrase to pass to NewLCAAllocator
+    var hPsk pnet.PSK
+    var sPsk string
     if *psk == nil {
-        envPsk, err := util.GetEnvPSK()
+        hPsk, err = util.GetEnvPSK()
         if err != nil {
             log.Fatalln(err)
         }
 
-        *psk = envPsk
+        sPsk = util.GetEnvPSKString()
+    } else {
+        hPsk = *psk
+        sPsk = util.GetFlagPSKString()
     }
 
     // Set node configuration
     nodeConfig := p2pnode.NewConfig()
     nodeConfig.PrivKey = priv
     nodeConfig.BootstrapPeers = *bootstraps
-    nodeConfig.PSK = *psk
+    nodeConfig.PSK = hPsk
 
     // Spawn LCA Allocator
     log.Println("Spawning LCA Allocator")
-    _, err = lca.NewLCAAllocator(ctx, nodeConfig)
+    _, err = lca.NewLCAAllocator(ctx, nodeConfig, sPsk)
     if err != nil {
         log.Fatalln(err)
     }
