@@ -92,7 +92,7 @@ func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
 }
 
 func (cache *PeerCache) AddPeer(p PeerRequest) {
-    log.Println("Adding new peer with ID", p.ID)
+    log.Println("Adding new peer with ID and service", p.ID, p.Hash)
     // Add peer to cache in second lowest level
     cache.mux.Lock()
     defer cache.mux.Unlock()

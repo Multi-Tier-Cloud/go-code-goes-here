@@ -35,6 +35,7 @@ func pingService() error {
 }
 
 // Helper function to AllocService that handles the communication with LCA Allocator
+// Returns the new service's IP:port pair
 func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     // Send command Start Program"
@@ -112,6 +113,11 @@ func (lca *LCAManager) AllocBetterService(
 }
 
 // Requests allocation on LCA Allocators with good network performance
+// Returns:
+//  - The peer ID of the allocator that spawned the new instance
+//  - The service address,
+//  - The performance of the allocator that spawned the instance
+//  - Any errors.
 func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
@@ -161,7 +167,15 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
     }
 
     peers := p2putil.SortPeers(peerChan, lca.Host)
+    if len(peers) > 0 {
+        // TODO: Remove second output param, now obsolete after proxy-to-proxy queries
+        return peers[0].ID, "dummyServAddr", peers[0].Perf, nil
+    }
 
+    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
+
+    // DEPRECATED
+    // TODO: Now that proxy-to-proxy is enabled, remove the code below?
     for _, p := range peers {
         // Get microservice address from peer's proxy
         log.Println("Attempting to contact peer with pid:", p.ID)
@@ -191,7 +205,6 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
     return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
 }
 
-// TODO: Finish this function
 func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, error) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
@@ -221,6 +234,8 @@ func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, 
     return resp, nil
 }
 
+// DEPRECATED
+// TODO: Now that proxy-to-proxy is enabled, remove the following function?
 // LCAManagerHandler generator function
 // Used to allow the Handler to remember the service address
 // Generated LCAManagerHandler pings the service it is responsible for to check
@@ -350,8 +365,6 @@ func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
     var node LCAManager
 
     // Set stream handler, protocol ID, and hash to advertise
-    cfg.StreamHandlers = append(cfg.StreamHandlers, FindServiceHandler(serviceAddress))
-    cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerFindProtID)
     cfg.StreamHandlers = append(cfg.StreamHandlers, RequestHandler(serviceAddress))
     cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerRequestProtID)
     if serviceName != "" {

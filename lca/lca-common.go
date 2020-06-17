@@ -18,7 +18,7 @@ import (
 var (
     DefaultListenAddrs []multiaddr.Multiaddr
 
-    LCAManagerFindProtID protocol.ID
+    LCAManagerFindProtID protocol.ID // Deprecated, re-use for something else?
     LCAManagerRequestProtID protocol.ID
 
     LCAAllocatorProtocolID protocol.ID

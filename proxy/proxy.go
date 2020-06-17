@@ -44,36 +44,55 @@ var cache pcache.PeerCache
 
 func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Response, error) {
     var err error
-
     var id peer.ID
     var serviceAddress string
+    var perf p2putil.PerfInd
 
-    // 2. Search for cached instances
-    // Search for an instance in the cache, up to 3 attempts
-    for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
-        // Backoff before searching again (the 5s is arbitrary at this point)
-        // TODO: Remove hard-coding
-        if attempts > 0 {
-            time.Sleep(5 * time.Second)
-        }
+    // 2. Search for cached instances, allocate new instance if none found
+    id, serviceAddress, err = cache.GetPeer(serviceHash)
+    log.Printf("Get peer returned ID %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
+    if err != nil {
+        // Search for an instance in the network, allocating a new one if need be.
+        // Maximum of 3 allocation attempts.
+        // TODO: It's totally possible for an allocation attempt to succeed,
+        // but the service takes a long time to come up, leading to subsequent
+        // allocation attempts. This is a future problem to solve.
+        serviceAddress = ""
+        startTime := time.Now()
+        for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
+            if attempts > 0 {
+                log.Printf("Unable to successfully find or allocate, retrying...")
+            }
 
-        // When := was used here for some reason, id and serviceAddress were getting shadowed
-        // even without the predeclaration of err
-        id, serviceAddress, err = cache.GetPeer(serviceHash)
-        log.Printf("Get peer returned ID %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
-        if err != nil {
-            // If does not exist, use libp2p connection to find/create service
+            // TODO: Always pass perf req into AllocService()
+            //       Need to combine AllocService and AllocBetterService
+            //       Need to obtain perf req from hash-lookup service
             log.Println("Finding best existing service instance")
-
-            startTime := time.Now()
-
-            id, serviceAddress, perf, err := manager.FindService(serviceHash)
+            id, serviceAddress, perf, err = manager.FindService(serviceHash)
             if err != nil {
                 log.Println("Could not find, creating new service instance")
-                id, serviceAddress, perf, err = manager.AllocService(dockerHash)
+                _, _, _, err = manager.AllocService(dockerHash)
                 if err != nil {
-                    log.Println("No services able to be found or created\n", err)
-                    continue
+                    log.Println("Service allocation failed\n", err)
+                }
+
+                // Re-do FindService() to ensure the new instance is connected
+                // to the network. Sleep 200ms or so to allow the service to
+                // come up. If not found, perform exponential backoff and attempt
+                // to re-find it (max 3 times). If it's still found, there may be
+                // something wrong with it (or it's taking too long to boot).
+                wait := 200 * time.Millisecond
+                time.Sleep(wait)
+                backoff, err := util.NewExpoBackoffAttempts(wait, time.Second, 5)
+                if err != nil {
+                    log.Printf("ERROR: Unable to create ExpoBackoffAttempts\n")
+                }
+                for backoff.Attempt() {
+                    id, serviceAddress, perf, err = manager.FindService(serviceHash)
+                    if err == nil && serviceAddress != "" {
+                        log.Printf("==== TLIN DEBUG: id service hash and perf are: %s %s %#v\n", id, serviceAddress, perf)
+                        break
+                    }
                 }
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 log.Println("Found service does not meet requirements, creating new service instance")
@@ -85,22 +104,24 @@ func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Respon
                 }
             }
 
-            elapsedTime := time.Now().Sub(startTime)
-            log.Println("Find/alloc service took:", elapsedTime)
-
-            // Cache peer information and loop again
-            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
-            continue
+            if err == nil && serviceAddress != "" {
+                // Cache peer information
+                cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+            }
         }
+
+        elapsedTime := time.Now().Sub(startTime)
+        log.Println("Find/alloc service took:", elapsedTime)
     }
 
-    log.Printf("Running request to peer ID %s, serviceAddr %s\n",
-               id, serviceAddress)
     if serviceAddress == "" || id == peer.ID("") {
         return nil, errors.New("Not found")
     }
+    log.Printf("Running request to peer ID %s, serviceAddr %s\n",
+               id, serviceAddress)
     resp, err := manager.Request(id, req)
     if err != nil {
+        log.Printf("ERROR: HTTP request over P2P failed\n%v\n", err)
         go cache.RemovePeer(id, serviceAddress)
     }
 
