@@ -35,9 +35,17 @@ func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
+// TODO: Clean this shit up; decrease number of package-scoped variables.
+//       Terrible style and makes things harder to debug / maintain.
+//       Perhaps wrap all proxy-related variables into a ProxyMetadata struct?
+//       Then that can be passed around easily.
+
 // HTTP listening endpoint for control messages
 // TODO: Make this configurable? i.e. proxy available to non-localhost?
 var ctrlHost = "127.0.0.1" // Port will be passed via CLI
+
+// Endpoint (IP:PORT) of service this proxy represents, when in service mode
+var servEndpoint string
 
 // Global LCA Manager instance to handle peer search and allocation
 var manager lca.LCAManager
@@ -49,15 +57,92 @@ var cache pcache.PeerCache
 type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
-    tcpWorker   func(net.Listener, string)
+    tcpWorker   func(net.Listener, peer.ID)
     udpWorker   func(*net.UDPConn, string)
 }
 
 // Maps a remote addr to existing ServiceProxy for that addr
 var serv2Fwd = make(map[string]Forwarder)
 
-// Handles the "proxying" part of proxy
-// TODO: Refactor this function
+func findOrAllocate(serviceHash, dockerHash string, req *http.Request) (peer.ID, error) {
+    var err error
+    var id peer.ID
+    var serviceAddress string
+    var perf p2putil.PerfInd
+
+    // 2. Search for cached instances
+    id, serviceAddress, err = cache.GetPeer(serviceHash)
+    log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
+    if err != nil {
+        // Search for an instance in the network, allocating a new one if need be.
+        // Maximum of 3 allocation attempts.
+        // TODO: It's totally possible for an allocation attempt to succeed,
+        // but the service takes a long time to come up, leading to subsequent
+        // allocation attempts. This is a future problem to solve.
+        serviceAddress = ""
+        startTime := time.Now()
+        for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
+            if attempts > 0 {
+                log.Printf("Unable to successfully find or allocate, retrying...")
+            }
+
+            // TODO: Always pass perf req into AllocService()
+            //       Need to combine AllocService and AllocBetterService
+            //       Need to obtain perf req from hash-lookup service
+            log.Println("Finding best existing service instance")
+            id, serviceAddress, perf, err = manager.FindService(serviceHash)
+            if err != nil {
+                log.Println("Could not find, creating new service instance")
+                _, _, _, err = manager.AllocService(dockerHash)
+                if err != nil {
+                    log.Println("Service allocation failed\n", err)
+                }
+
+                // Re-do FindService() to ensure the new instance is connected
+                // to the network. Sleep 200ms or so to allow the service to
+                // come up. If not found, perform exponential backoff and attempt
+                // to re-find it (max 3 times). If it's still found, there may be
+                // something wrong with it (or it's taking too long to boot).
+                wait := 200 * time.Millisecond
+                time.Sleep(wait)
+                backoff, err := util.NewExpoBackoffAttempts(wait, time.Second, 5)
+                if err != nil {
+                    log.Printf("ERROR: Unable to create ExpoBackoffAttempts\n")
+                }
+                for backoff.Attempt() {
+                    id, serviceAddress, perf, err = manager.FindService(serviceHash)
+                    if err == nil && serviceAddress != "" {
+                        break
+                    }
+                }
+            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
+                log.Println("Found service does not meet requirements, creating new service instance")
+                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
+                if err != nil {
+                    log.Println("No services able to be created, using previously found peer")
+                } else {
+                    id, serviceAddress = id2, serviceAddress2
+                }
+            }
+
+            if err == nil && serviceAddress != "" {
+                // Cache peer information and loop again
+                cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+            }
+        }
+
+        elapsedTime := time.Now().Sub(startTime)
+        log.Println("Find/alloc service took:", elapsedTime)
+    }
+
+    if serviceAddress == "" || id == peer.ID("") {
+        return peer.ID(""), fmt.Errorf("Unable to find or allocate service\n")
+    }
+
+    return id, nil
+}
+
+// Handles the setting up proxies to services
 func requestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println("Got request:", r.URL.RequestURI()[1:])
 
@@ -101,60 +186,15 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         manager.Host.RoutingDiscovery, serviceName,
     )
     if err != nil {
-        http.Error(w, "404 Not Found", http.StatusNotFound)
+        http.Error(w, "404 Not Found in hash lookup", http.StatusNotFound)
         fmt.Fprintf(w, "%s\n", err)
         log.Printf("ERROR: Hash lookup failed\n%s\n", err)
         return
     }
-    var id peer.ID
-    var serviceAddress string
 
-    // 2. Search for cached instances
-    // Search for an instance in the cache, up to 3 attempts
-    for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
-        // Backoff before searching again (the 5s is arbitrary at this point)
-        // TODO: Remove hard-coding
-        if attempts > 0 {
-            time.Sleep(5 * time.Second)
-        }
-
-        id, serviceAddress, err = cache.GetPeer(serviceHash)
-        log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
-        if err != nil {
-            // If does not exist, use libp2p connection to find/create service
-            log.Println("Finding best existing service instance")
-
-            startTime := time.Now()
-
-            id, serviceAddress, perf, err := manager.FindService(serviceHash)
-            if err != nil {
-                log.Println("Could not find, creating new service instance")
-                id, serviceAddress, perf, err = manager.AllocService(dockerHash)
-                if err != nil {
-                    log.Println("No services able to be found or created\n", err)
-                    continue
-                }
-            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                log.Println("Found service does not meet requirements, creating new service instance")
-                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
-                if err != nil {
-                    log.Println("No services able to be created, using previously found peer")
-                } else {
-                    id, serviceAddress = id2, serviceAddress2
-                }
-            }
-
-            elapsedTime := time.Now().Sub(startTime)
-            log.Println("Find/alloc service took:", elapsedTime)
-
-            // Cache peer information and loop again
-            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
-            continue
-        }
-    }
-
-    if serviceAddress == "" || id == peer.ID("") {
-        http.NotFound(w, r)
+    peerProxyID, err := findOrAllocate(serviceHash, dockerHash, r)
+    if err != nil {
+        http.Error(w, "404 Service Not Found", http.StatusNotFound)
         return
     }
 
@@ -162,9 +202,11 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     // Start separate goroutine for handling connections and proxying to service
     var listenAddr string
     if tpProto == "tcp" {
-        listenAddr, err = openTCPProxy(serviceAddress)
+        listenAddr, err = openTCPProxy(peerProxyID)
     } else if tpProto == "udp" {
-        listenAddr, err = openUDPProxy(serviceAddress)
+        http.Error(w, "CURRENTLY NOT SUPPORTED", http.StatusForbidden)
+        return
+        //listenAddr, err = openUDPProxy(manager.Host.Host, peerProxyID)
     } else {
         // Should not get here
         http.Error(w, "Unknown transport protocol", http.StatusInternalServerError)
@@ -249,7 +291,6 @@ func main() {
     var mode string
     var port string
     var service string
-    var address string
     switch flag.NArg() {
     case 1:
         mode = "anonymous"
@@ -258,7 +299,7 @@ func main() {
         mode = "service"
         port = flag.Arg(0)
         service = flag.Arg(1)
-        address = flag.Arg(2)
+        servEndpoint = flag.Arg(2)
     default:
         flag.Usage()
         os.Exit(1)
@@ -325,6 +366,11 @@ func main() {
     nodeConfig.BootstrapPeers = *bootstraps
     nodeConfig.PSK = *psk
 
+    // Set up TCP and UDP handlers
+    // TODO: UDP
+    nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, tcpTunnelProtoID)
+    nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, tcpTunnelHandler)
+
     // Setup LCA Manager
     ctx := context.Background()
     if mode == "anonymous" {
@@ -332,8 +378,8 @@ func main() {
         manager, err = lca.NewLCAManager(ctx, nodeConfig, "", "")
     } else {
         log.Println("Starting LCA Manager in service mode with arguments",
-                    service, address)
-        manager, err = lca.NewLCAManager(ctx, nodeConfig, service, address)
+                    service, servEndpoint)
+        manager, err = lca.NewLCAManager(ctx, nodeConfig, service, servEndpoint)
     }
 
     if err != nil {
@@ -351,7 +397,7 @@ func main() {
     // Boot up cache managment function
     go cache.UpdateCache()
 
-    // Setup HTTP proxy service
+    // Setup HTTP control service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
     log.Println("Starting HTTP control endpoint on:", ctrlHost + ":" + port)
