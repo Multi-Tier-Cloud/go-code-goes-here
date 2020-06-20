@@ -117,6 +117,9 @@ func openTCPProxy(servicePeer peer.ID) (string, error) {
 // Handler for tcpTunnelProtoID
 // Make a connection to the local service and forward data to/from it
 func tcpTunnelHandler(stream network.Stream) {
+    lConn := gostream.NewConn(stream)
+    defer lConn.Close()
+
     // Resolve and open connection to destination service
     rAddr, err := net.ResolveTCPAddr("tcp", servEndpoint)
     if err != nil {
@@ -127,10 +130,9 @@ func tcpTunnelHandler(stream network.Stream) {
     rConn, err := net.DialTCP("tcp", nil, rAddr)
     if err != nil {
         log.Printf("ERROR: Unable to dial target address %s\n%v\n", servEndpoint, err)
+        return
     }
     defer rConn.Close()
-
-    lConn := gostream.NewConn(stream)
 
     // Forward data in each direction
     go tcpFwdData(lConn, rConn)

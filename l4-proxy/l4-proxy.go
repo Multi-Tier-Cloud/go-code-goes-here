@@ -117,22 +117,20 @@ func findOrAllocate(serviceHash, dockerHash string, req *http.Request) (peer.ID,
                 }
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 log.Println("Found service does not meet requirements, creating new service instance")
-                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
+                id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     log.Println("No services able to be created, using previously found peer")
-                } else {
-                    id, serviceAddress = id2, serviceAddress2
                 }
-            }
-
-            if err == nil && serviceAddress != "" {
-                // Cache peer information and loop again
-                cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
             }
         }
 
-        elapsedTime := time.Now().Sub(startTime)
-        log.Println("Find/alloc service took:", elapsedTime)
+        if err == nil && serviceAddress != "" {
+            // Cache peer information and loop again
+            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+
+            elapsedTime := time.Now().Sub(startTime)
+            log.Println("Find/alloc service took:", elapsedTime)
+        }
     }
 
     if serviceAddress == "" || id == peer.ID("") {
