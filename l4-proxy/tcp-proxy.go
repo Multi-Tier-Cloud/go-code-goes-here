@@ -5,7 +5,15 @@ import (
     "log"
     "net"
     "syscall"
+
+    "github.com/libp2p/go-libp2p-core/network"
+    "github.com/libp2p/go-libp2p-core/peer"
+    "github.com/libp2p/go-libp2p-core/protocol"
+
+    "github.com/t-lin/go-libp2p-gostream"
 )
+
+var tcpTunnelProtoID = protocol.ID("/LCATunnelTCP/1.0")
 
 // TCP data forwarder
 // Simplified version of pipe() from https://github.com/jpillora/go-tcp-proxy/blob/master/proxy.go
@@ -38,20 +46,14 @@ func tcpFwdData(src, dst net.Conn) {
 }
 
 // Connection forwarder
-func tcpFwdConnToServ(lConn net.Conn, targetAddr string) {
+func tcpFwdConnToServ(lConn net.Conn, targetPeer peer.ID) {
     defer lConn.Close()
     log.Printf("Accepted TCP conn: %s <=> %s\n", lConn.LocalAddr(), lConn.RemoteAddr())
 
-    // Resolve and open connection to destination service
-    rAddr, err := net.ResolveTCPAddr("tcp", targetAddr)
+    p2pNode := manager.Host
+    rConn, err := gostream.Dial(p2pNode.Ctx, p2pNode.Host, targetPeer, tcpTunnelProtoID)
     if err != nil {
-        log.Printf("ERROR: Unable to resolve target address %s\n%v\n", targetAddr, err)
-        return
-    }
-
-    rConn, err := net.DialTCP("tcp", nil, rAddr)
-    if err != nil {
-        log.Printf("ERROR: Unable to dial target address %s\n%v\n", targetAddr, err)
+        log.Printf("ERROR: Unable to dial target peer %s\n%v\n", targetPeer, err)
         return
     }
     defer rConn.Close()
@@ -62,7 +64,7 @@ func tcpFwdConnToServ(lConn net.Conn, targetAddr string) {
 }
 
 // Implementation of ServiceProxy
-func tcpServiceProxy(listen net.Listener, targetAddr string) {
+func tcpServiceProxy(listen net.Listener, targetPeer peer.ID) {
     defer listen.Close()
 
     for {
@@ -77,7 +79,7 @@ func tcpServiceProxy(listen net.Listener, targetAddr string) {
         }
 
         // Forward connection
-        go tcpFwdConnToServ(conn, targetAddr)
+        go tcpFwdConnToServ(conn, targetPeer)
     }
 }
 
@@ -90,9 +92,9 @@ func tcpServiceProxy(listen net.Listener, targetAddr string) {
 // Start separate goroutine for handling connections and proxying to service
 //
 // Returns a string of the new TCP listening endpoint address
-func openTCPProxy(serviceAddr string) (string, error) {
+func openTCPProxy(servicePeer peer.ID) (string, error) {
     var listenAddr string
-    serviceKey := "tcp://" + serviceAddr
+    serviceKey := "tcp://" + string(servicePeer)
     if _, exists := serv2Fwd[serviceKey]; !exists {
         listen, err := net.Listen("tcp", ctrlHost + ":") // automatically choose port
         if err != nil {
@@ -104,7 +106,7 @@ func openTCPProxy(serviceAddr string) (string, error) {
             ListenAddr: listenAddr,
             tcpWorker: tcpServiceProxy,
         }
-        go serv2Fwd[serviceKey].tcpWorker(listen, serviceAddr)
+        go serv2Fwd[serviceKey].tcpWorker(listen, servicePeer)
     } else {
         listenAddr = serv2Fwd[serviceKey].ListenAddr
     }
@@ -112,3 +114,25 @@ func openTCPProxy(serviceAddr string) (string, error) {
     return listenAddr, nil
 }
 
+// Handler for tcpTunnelProtoID
+// Make a connection to the local service and forward data to/from it
+func tcpTunnelHandler(stream network.Stream) {
+    // Resolve and open connection to destination service
+    rAddr, err := net.ResolveTCPAddr("tcp", servEndpoint)
+    if err != nil {
+        log.Printf("ERROR: Unable to resolve target address %s\n%v\n", servEndpoint, err)
+        return
+    }
+
+    rConn, err := net.DialTCP("tcp", nil, rAddr)
+    if err != nil {
+        log.Printf("ERROR: Unable to dial target address %s\n%v\n", servEndpoint, err)
+    }
+    defer rConn.Close()
+
+    lConn := gostream.NewConn(stream)
+
+    // Forward data in each direction
+    go tcpFwdData(lConn, rConn)
+    tcpFwdData(rConn, lConn)
+}

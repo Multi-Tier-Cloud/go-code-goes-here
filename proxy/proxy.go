@@ -90,7 +90,6 @@ func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Respon
                 for backoff.Attempt() {
                     id, serviceAddress, perf, err = manager.FindService(serviceHash)
                     if err == nil && serviceAddress != "" {
-                        log.Printf("==== TLIN DEBUG: id service hash and perf are: %s %s %#v\n", id, serviceAddress, perf)
                         break
                     }
                 }
