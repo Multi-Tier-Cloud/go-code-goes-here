@@ -58,7 +58,7 @@ type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
     tcpWorker   func(net.Listener, peer.ID)
-    udpWorker   func(*net.UDPConn, string)
+    udpWorker   func(*net.UDPConn, peer.ID)
 }
 
 // Maps a remote addr to existing ServiceProxy for that addr
@@ -202,9 +202,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     if tpProto == "tcp" {
         listenAddr, err = openTCPProxy(peerProxyID)
     } else if tpProto == "udp" {
-        http.Error(w, "CURRENTLY NOT SUPPORTED", http.StatusForbidden)
-        return
-        //listenAddr, err = openUDPProxy(manager.Host.Host, peerProxyID)
+        listenAddr, err = openUDPProxy(peerProxyID)
     } else {
         // Should not get here
         http.Error(w, "Unknown transport protocol", http.StatusInternalServerError)
@@ -365,9 +363,10 @@ func main() {
     nodeConfig.PSK = *psk
 
     // Set up TCP and UDP handlers
-    // TODO: UDP
     nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, tcpTunnelProtoID)
     nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, tcpTunnelHandler)
+    nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, udpTunnelProtoID)
+    nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, udpTunnelHandler)
 
     // Setup LCA Manager
     ctx := context.Background()

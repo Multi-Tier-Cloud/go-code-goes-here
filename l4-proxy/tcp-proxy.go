@@ -114,7 +114,7 @@ func openTCPProxy(servicePeer peer.ID) (string, error) {
     return listenAddr, nil
 }
 
-// Handler for tcpTunnelProtoID
+// Handler for tcpTunnelProtoID (i.e. invoked at destination proxy)
 // Make a connection to the local service and forward data to/from it
 func tcpTunnelHandler(stream network.Stream) {
     lConn := gostream.NewConn(stream)
