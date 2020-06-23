@@ -13,6 +13,7 @@ import (
     "strings"
     "time"
 
+    "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/pnet"
 
@@ -58,7 +59,7 @@ type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
     tcpWorker   func(net.Listener, peer.ID)
-    udpWorker   func(*net.UDPConn, peer.ID)
+    udpWorker   func(network.Network, *net.UDPConn, peer.ID)
 }
 
 // Maps a remote addr to existing ServiceProxy for that addr
