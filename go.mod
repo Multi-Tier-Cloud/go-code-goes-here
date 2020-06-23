@@ -11,8 +11,10 @@ require (
 	github.com/gorilla/mux v1.7.4 // indirect
 	github.com/libp2p/go-libp2p v0.9.2
 	github.com/libp2p/go-libp2p-core v0.5.6
+	github.com/libp2p/go-msgio v0.0.4
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/multiformats/go-multiaddr v0.2.2
 	github.com/prometheus/client_golang v1.6.0
+	github.com/t-lin/go-libp2p-gostream v0.2.2-0.20200623124215-b6cc09d9366b
 	gotest.tools v2.2.0+incompatible // indirect
 )
