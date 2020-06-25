@@ -16,6 +16,7 @@ import (
     "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/pnet"
+    "github.com/libp2p/go-libp2p-core/protocol"
 
     "github.com/multiformats/go-multiaddr"
 
@@ -45,6 +46,9 @@ func init() {
 // TODO: Make this configurable? i.e. proxy available to non-localhost?
 var ctrlHost = "127.0.0.1" // Port will be passed via CLI
 
+// Human-readable name for the service this proxy represents
+var service string
+
 // Endpoint (IP:PORT) of service this proxy represents, when in service mode
 var servEndpoint string
 
@@ -65,7 +69,7 @@ type Forwarder struct {
 // Maps a remote addr to existing ServiceProxy for that addr
 var serv2Fwd = make(map[string]Forwarder)
 
-func findOrAllocate(serviceHash, dockerHash string, req *http.Request) (peer.ID, error) {
+func findOrAllocate(serviceHash, dockerHash string) (peer.ID, error) {
     var err error
     var id peer.ID
     var serviceAddress string
@@ -117,7 +121,8 @@ func findOrAllocate(serviceHash, dockerHash string, req *http.Request) (peer.ID,
                     }
                 }
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                log.Println("Found service does not meet requirements, creating new service instance")
+                log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, cache.ReqPerf.SoftReq)
+                log.Println("Creating new service instance")
                 id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     log.Println("No services able to be created, using previously found peer")
@@ -141,17 +146,46 @@ func findOrAllocate(serviceHash, dockerHash string, req *http.Request) (peer.ID,
     return id, nil
 }
 
+// Returns the components of the URI, excluding the first and last '/'
+func splitURIPath(uriPath string) []string {
+    uriPath = strings.TrimPrefix(uriPath, "/")
+    uriPath = strings.TrimSuffix(uriPath, "/")
+    res := strings.Split(uriPath, "/")
+    if res[0] == "" {
+        // Case where URI did not contain any components
+        // Split() normally returns min slice of length 1 if the
+        // separator wasn't found. Instead, return an empty slice.
+        return []string{}
+    }
+
+    return res
+}
+
+func createStream(targetPeer peer.ID, proto protocol.ID) (network.Stream, error) {
+    p2pNode := manager.Host
+    stream, err := p2pNode.Host.NewStream(p2pNode.Ctx, targetPeer, proto)
+    if err != nil {
+        return nil, err
+    }
+
+    return stream, nil
+}
+
 // Handles the setting up proxies to services
 func requestHandler(w http.ResponseWriter, r *http.Request) {
-    log.Println("Got request:", r.URL.RequestURI()[1:])
+    log.Println("Got request:", r.URL.RequestURI())
 
     // 1. Find service information and arguments from URL
     // URL.RequestURI() includes path?query (URL.Path only has the path)
-    // tokens[0] should be an empty string from parsing the initial "/"
-    tokens := strings.Split(r.URL.RequestURI(), "/")
-
-    if len(tokens) < 3 {
+    if r.URL.RawQuery != "" {
         http.Error(w, "Bad Request", http.StatusBadRequest)
+        return
+    }
+    chainSpec := splitURIPath(r.URL.Path)
+
+    if len(chainSpec) < 2 {
+        http.Error(w, "Bad Request", http.StatusBadRequest)
+        // TODO: Update this error message with chain specs
         fmt.Fprintf(w, "Error: Incorrect API usage, expecting a protocol " +
             "('tcp' or 'udp') and a service name.\n" +
             "e.g. http://%s/tcp/name-of-service\n", ctrlHost)
@@ -159,7 +193,8 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    tpProto := tokens[1]
+    // Since we're in the HTTP handler, we know the chain has not been set up
+    tpProto := chainSpec[0]
     switch tpProto {
     case "udp", "tcp": // do nothing
     default:
@@ -168,16 +203,9 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    serviceName := tokens[2]
+    serviceName := chainSpec[1]
     log.Printf("Requested protocol is: %s\n", tpProto)
     log.Printf("Requested service is: %s\n", serviceName)
-
-    // check if arguments exist
-    var arguments []string
-    if len(tokens) > 3 {
-        arguments = tokens[3:]
-        log.Printf("Parsed arguments are: %s\n", arguments)
-    }
 
     log.Println("Looking for service with name", serviceName, "in hash-lookup")
     info, err := registry.GetServiceWithHostRouting(
@@ -191,7 +219,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash, r)
+    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash)
     if err != nil {
         http.Error(w, "404 Service Not Found", http.StatusNotFound)
         return
@@ -287,7 +315,6 @@ func main() {
     // Parse positional arguments
     var mode string
     var port string
-    var service string
     switch flag.NArg() {
     case 1:
         mode = "anonymous"
