@@ -125,16 +125,6 @@ func udpFwdConn2Stream(src net.Conn, dst network.Stream) {
     }
 }
 
-func createStream(targetPeer peer.ID) (network.Stream, error) {
-    p2pNode := manager.Host
-    stream, err := p2pNode.Host.NewStream(p2pNode.Ctx, targetPeer, udpTunnelProtoID)
-    if err != nil {
-        return nil, err
-    }
-
-    return stream, nil
-}
-
 // Demultiplex incoming packets and forward them to destination
 func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer.ID) {
     defer func() {
@@ -201,7 +191,7 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
         if rConn, exists = client2Stream[from.String()]; !exists {
             log.Printf("New UDP conn: %s <=> %s\n", lConn.LocalAddr(), from)
 
-            if rConn, err = createStream(targetPeer); err != nil {
+            if rConn, err = createStream(targetPeer, udpTunnelProtoID); err != nil {
                 log.Printf("ERROR: Unable to dial target peer %s\n%v\n", targetPeer, err)
                 return
             }
@@ -240,7 +230,7 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
                 //  2) Peer may have been restarted (or a momentary network disconnection)
                 // Attempt Write() again with newly created stream
                 mapMtx.Lock()
-                if rConn, err = createStream(targetPeer); err != nil {
+                if rConn, err = createStream(targetPeer, udpTunnelProtoID); err != nil {
                     log.Printf("ERROR: Unable to dial target peer %s\n%v\n", targetPeer, err)
                     return
                 }

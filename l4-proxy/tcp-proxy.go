@@ -84,12 +84,10 @@ func tcpServiceProxy(listen net.Listener, targetPeer peer.ID) {
 }
 
 // Open TCP tunnel to service and open local TCP listening port
+// Start separate goroutine for handling connections and proxying to service
 // NOTE: Currently doesn't support SSL/TLS
 //
 // TODO: In the future, perhaps the connection type info (TCP/UDP) can be stored in hash-lookup?
-// TODO: In the future, move towards proxy-to-proxy implementation
-//       This may be useful? https://github.com/libp2p/go-libp2p-gostream
-// Start separate goroutine for handling connections and proxying to service
 //
 // Returns a string of the new TCP listening endpoint address
 func openTCPProxy(servicePeer peer.ID) (string, error) {
