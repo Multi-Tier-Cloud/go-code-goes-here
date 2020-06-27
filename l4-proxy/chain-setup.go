@@ -29,6 +29,8 @@ const (
     Data
 )
 
+const REV_CHAIN_MSG_PREFIX = "Reverse chain: "
+
 func (cmType ChainMsgType) String() string {
     switch cmType {
     case Error:
@@ -151,7 +153,7 @@ func expectTypePrintErr(cm *ChainMsg, ct ChainMsgType) bool {
             if err != nil {
                 log.Printf("ERROR: Unable to decode chain message: %v\n", err)
             } else {
-                log.Printf("%v", actualErr)
+                log.Printf("ChainMsg ERROR: %v\n", actualErr)
             }
         } else {
             log.Printf("ERROR: Expected a chain type %s, but got %s instead\n", ct, cm.Type)
@@ -204,5 +206,82 @@ func (cmsr *chainMsgCommunicator) Send(obj *ChainMsg) error {
 
 func (cmsr *chainMsgCommunicator) GetStream() network.Stream {
     return cmsr.stream
+}
+
+// TODO: Wrap the following functions in a "NFV" structure?
+//       It'd be responsible for managing the 3 connections (input/output/service)
+// NOTE: This function is asynchronous (i.e. will send and simply return, will
+//       not wait for a SetupACK)
+func sendSetupRequest(cmsr *chainMsgCommunicator, chainSpec []string) error {
+    setupMsg := NewChainSetupRequest(chainSpec)
+    if err := cmsr.Send(setupMsg); err != nil {
+        return fmt.Errorf("Attempt to send %s message failed\n%w\n", setupMsg.Type, err)
+    }
+
+    return nil
+}
+
+func receiveSetupRequest(cmsr *chainMsgCommunicator) ([]string, error) {
+    msg, err := cmsr.Recv()
+    if err != nil {
+        return nil, fmt.Errorf("Unable to receive chain message\n%w\n", err);
+    }
+
+    if !expectTypePrintErr(msg, SetupRequest) {
+        return nil, fmt.Errorf("Received ChainMsg was not type %s\n", SetupRequest)
+    }
+
+    msgData, err := DecodeChainData(msg)
+    if err != nil {
+        return nil, fmt.Errorf("Unable to decode chain message\n%w\n", err)
+    }
+
+    chainSpec, ok := msgData.([]string)
+    if !ok {
+        return nil, fmt.Errorf("Expected data in %s message to be type '[]string', " +
+                    "but was type '%T'\n", msg.Type, msgData)
+    }
+
+    return chainSpec, nil
+}
+
+// ACK message doesn't need a payload, but an optional string can be used for debugging
+// If 'debug' is not used, simply provide an empty string (i.e. "")
+func sendSetupACK(cmsr *chainMsgCommunicator, debug string) error {
+    resMsg := NewChainSetupACK(debug)
+    if err := cmsr.Send(resMsg); err != nil {
+        return fmt.Errorf("Attempt to send %s message failed\n%w\n", resMsg.Type, err)
+    }
+
+    return nil
+}
+
+// Waits to receive a ChainMsg and verifies it is of type SetupACK.
+// Returns the ChainMsg's Data as a string, if it exists. Note that
+// the output string is just for any debugging data to be passed back.
+func receiveSetupACK(cmsr *chainMsgCommunicator) (string, error) {
+    msg, err := cmsr.Recv()
+    if err != nil {
+        return "", fmt.Errorf("Unable to receive chain message\n%w\n", err);
+    }
+
+    if !expectTypePrintErr(msg, SetupACK) {
+        return "", fmt.Errorf("Received ChainMsg was not type %s\n", SetupACK)
+    }
+
+    // NOTE: Passing messages back in the ACK is just for debugging.
+    //       Receiving the ACK alone should indicate success.
+    msgData, err := DecodeChainData(msg)
+    if err != nil {
+        return "", fmt.Errorf("Unable to decode chain message\n%w\n", err)
+    }
+
+    debugStr, ok := msgData.(string)
+    if !ok {
+        return "", fmt.Errorf("Expected data in %s message to be type '[]string', " +
+                    "but was type '%T'\n", msg.Type, msgData)
+    }
+
+    return debugStr, nil
 }
 
