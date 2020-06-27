@@ -10,6 +10,7 @@ import (
     "encoding/gob"
     "fmt"
     "log"
+    "strings"
 
     "github.com/libp2p/go-msgio"
     "github.com/libp2p/go-libp2p-core/network"
@@ -285,3 +286,152 @@ func receiveSetupACK(cmsr *chainMsgCommunicator) (string, error) {
     return debugStr, nil
 }
 
+// Function for source (client) proxy to begin chain setup operation
+func setupChain(chainSpec []string) error {
+    if len(chainSpec) < 2 {
+        return fmt.Errorf("Chain spec must contain at least two tokens " +
+            "(transport protocol and a service name)\n")
+    }
+
+    var err error
+
+    tpProto := chainSpec[0]
+    servName := chainSpec[1]
+
+    // Verify proto
+    switch tpProto {
+    case "udp", "tcp": // do nothing
+    default:
+        log.Printf("ERROR: Unrecognized transport protocol: %s\n", tpProto)
+        return fmt.Errorf("Expecting protocol to be either 'tcp' or 'udp'\n")
+    }
+
+    log.Printf("Requested protocol is: %s\n", tpProto)
+    log.Printf("Requested service is: %s\n", servName)
+
+    peerProxyID, err := resolveService(servName)
+    if err != nil {
+        err = fmt.Errorf("Unable to resolve service %s\n%w\n", servName, err)
+        log.Printf("ERROR: %v", err)
+        return err
+    }
+
+    // Send chain setup request
+    var stream network.Stream
+    if stream, err = createStream(peerProxyID, chainSetupProtoID); err != nil {
+        err = fmt.Errorf("Unable to open stream to peer %s\n%w\n", peerProxyID, err)
+        log.Printf("ERROR: %v", err)
+        return err
+    }
+
+    sendRecv := NewChainMsgCommunicator(stream)
+    setupReq := NewChainSetupRequest(chainSpec)
+    sendRecv.Send(setupReq)
+
+    // TODO: handleMsg() function that uses type switch and
+    //       calls other functions to handle specific types
+
+    // Wait for ack from downstream
+    resMsg, err := receiveSetupACK(sendRecv)
+    if err != nil {
+        err = fmt.Errorf("Unable to receive chain SetupACK\n%w\n", err)
+        log.Printf("ERROR: %v\n", err)
+        return err
+    }
+
+    if resMsg != "" {
+        log.Printf("Message received: %s\n", resMsg)
+    }
+
+    return nil
+}
+
+// Handler for chainSetupProtoID (i.e. invoked at destination proxy)
+func chainSetupHandler(stream network.Stream) {
+    defer stream.Close()
+    var err error
+
+    // Input stream sender/receiver
+    inSendRecv := NewChainMsgCommunicator(stream)
+
+    chainSpec, err := receiveSetupRequest(inSendRecv)
+    if err != nil {
+        log.Printf("ERROR: receiveSetupRequest() failed\n%v\n", err)
+        return
+    }
+
+    // Find ourself (the service this proxy represents) in the chain,
+    // and open connection to next service's proxy
+    // TODO: Right now we assume a service is specified ONLY ONCE in the chain
+    //       If we allow multiple occurrences, this will need to be re-designed
+    // TODO: PREVENT LOOPED CHAIN SPECS!
+    var tpProto string
+    var nextServ string
+    foundMe := false
+    for _, token := range chainSpec {
+        if token == "udp" || token == "tcp" {
+            tpProto = token
+        } else if token == service { // 'service' is currently global
+            foundMe = true
+        } else if foundMe == true {
+            nextServ = token
+            break
+        }
+    }
+
+    if foundMe == false {
+        log.Printf("ERROR: This service (%s) was not found in the chain spec: %v\n", service, chainSpec)
+        return
+    } else if foundMe == true && nextServ == "" {
+        // This is the destination service
+        // Return msg to previous proxy acknowledging setup
+        log.Printf("End of chain reached, sending SetupACK back\n")
+        err = sendSetupACK(inSendRecv, REV_CHAIN_MSG_PREFIX + service)
+        if err != nil {
+            log.Printf("ERROR: Unable to send ACK to previous service\n%v\n", err)
+        }
+        return
+    }
+
+    // If the chain extends beyond this service, keep going.
+    // Dial the next service and forward the chain setup message.
+    log.Printf("The next service is: %s %s\n", tpProto, nextServ)
+
+    log.Println("Looking for service with name", nextServ, "in hash-lookup")
+    peerProxyID, err := resolveService(nextServ)
+    if err != nil {
+        log.Printf("ERROR: Unable to resolve service %s\n%v\n", nextServ, err)
+        return
+    }
+
+    // Create output stream sender/receiver
+    var outStream network.Stream
+    if outStream, err = createStream(peerProxyID, chainSetupProtoID); err != nil {
+        log.Printf("ERROR: Unable to dial target peer %s\n%v\n", peerProxyID, err)
+        return
+    }
+
+    outSendRecv := NewChainMsgCommunicator(outStream)
+
+    // Forward chain setup request
+    if err = sendSetupRequest(outSendRecv, chainSpec); err != nil {
+        log.Printf("ERROR: sendSetupRequest() failed\n%v\n", err)
+        return
+    }
+
+    // Wait for ack from downstream
+    resMsg, err := receiveSetupACK(outSendRecv)
+    if err != nil {
+        log.Printf("ERROR: receiveSetupACK() failed\n%v\n", err)
+        return
+    }
+
+    // NOTE: Passing messages back in the ACK is just for debugging.
+    //       Append this service to the ACK data and ACK prev service.
+    if strings.HasPrefix(resMsg, REV_CHAIN_MSG_PREFIX) {
+        resMsg += " " + service
+    }
+    sendSetupACK(inSendRecv, resMsg)
+
+    return
+}

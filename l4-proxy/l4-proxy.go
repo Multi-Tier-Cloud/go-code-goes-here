@@ -171,6 +171,31 @@ func createStream(targetPeer peer.ID, proto protocol.ID) (network.Stream, error)
     return stream, nil
 }
 
+// resolveService() performs the service name to hash lookup, and then finds
+// an appropriate peer that provides that service, allocating a new instance
+// if necessary.
+func resolveService(servName string) (peer.ID, error) {
+    log.Println("Looking for service with name", servName, "in hash-lookup")
+    servHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
+        manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, servName)
+
+    if err != nil {
+        //log.Printf("ERROR: Hash lookup for service %s failed\n%s\n", servName, err)
+        return "", fmt.Errorf("ERROR: Hash lookup for service %s failed\n%s\n",
+                                servName, err)
+    }
+
+    peerProxyID, err := findOrAllocate(servHash, dockerHash)
+    if err != nil {
+        //log.Printf("ERROR: Unable to find or allocate service %s (%s)\n%v\n", servName, servHash, err)
+        return "", fmt.Errorf("ERROR: Unable to find or allocate service %s (%s)\n%v\n",
+                                servName, servHash, err)
+    }
+
+    return peerProxyID, nil
+}
+
 // Handles the setting up proxies to services
 func requestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println("Got request:", r.URL.RequestURI())
@@ -192,6 +217,16 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         log.Printf("ERROR: Incorrect number of arguments in HTTP URI\n")
         return
     }
+
+    // Check if this is a service chain, and set it up
+    err := setupChain(chainSpec)
+    if err != nil {
+        http.Error(w, "Bad Request", http.StatusBadRequest)
+        log.Printf("ERROR: Chain setup failed\n%v\n", err)
+        return
+    }
+
+    return // REMOVE LATER
 
     // Since we're in the HTTP handler, we know the chain has not been set up
     tpProto := chainSpec[0]
@@ -395,6 +430,10 @@ func main() {
     nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, tcpTunnelHandler)
     nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, udpTunnelProtoID)
     nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, udpTunnelHandler)
+
+    // Set up chain setup handler
+    nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, chainSetupProtoID)
+    nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, chainSetupHandler)
 
     // Setup LCA Manager
     ctx := context.Background()
