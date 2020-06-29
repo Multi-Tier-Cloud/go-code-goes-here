@@ -8,9 +8,12 @@ package main
 import (
     "bytes"
     "encoding/gob"
+    "errors"
     "fmt"
+    "io"
     "log"
     "strings"
+    "syscall"
 
     "github.com/libp2p/go-msgio"
     "github.com/libp2p/go-libp2p-core/network"
@@ -355,6 +358,49 @@ func receiveData(cmsr *chainMsgCommunicator) ([]byte, error) {
     return msgBytes, nil
 }
 
+func fwdStream2Stream(src, dst network.Stream) {
+    defer func() {
+        log.Printf("Closing connection %s <=> %s\n",
+            dst.Conn().LocalPeer(), dst.Conn().RemotePeer())
+        dst.Reset()
+        src.Reset()
+    }()
+
+    // Ideally, we can directly forward the connection's bytes. This would
+    // be most performant. However, we choose to decode and re-encode to be
+    // able to intercept errors that occur and print messages. This is useful
+    // for debugging.
+    var err error
+    var msgBytes []byte
+    srcComm := NewChainMsgCommunicator(src)
+    dstComm := NewChainMsgCommunicator(dst)
+
+    for {
+        if msgBytes, err = receiveData(srcComm); err != nil {
+            log.Printf("ERROR: %v\n", err)
+            if errors.Is(err, syscall.EINVAL) || errors.Is(err, io.EOF) {
+                log.Printf("Connection %s <=> %s closed by remote",
+                    src.Conn().LocalPeer(), src.Conn().RemotePeer())
+            } else {
+                log.Printf("Unable to read from connection %s <=> %s\n%v\n",
+                    src.Conn().LocalPeer(), src.Conn().RemotePeer(), err)
+            }
+            return
+        }
+
+        if err = sendData(dstComm, msgBytes); err != nil {
+            if errors.Is(err, syscall.EINVAL) {
+                log.Printf("Connection %s <=> %s closed",
+                    dst.Conn().LocalPeer(), dst.Conn().RemotePeer())
+            } else {
+                log.Printf("ERROR: Unable to write to connection %s <=> %s\n%v\n",
+                    dst.Conn().LocalPeer(), dst.Conn().RemotePeer(), err)
+            }
+            return
+        }
+    }
+}
+
 // Function for source (client) proxy to begin chain setup operation
 func setupChain(chainSpec []string) (network.Stream, error) {
     if len(chainSpec) < 2 {
@@ -417,7 +463,6 @@ func setupChain(chainSpec []string) (network.Stream, error) {
 
 // Handler for chainSetupProtoID (i.e. invoked at destination proxy)
 func chainSetupHandler(stream network.Stream) {
-    defer stream.Close()
     var err error
 
     // Input stream sender/receiver
@@ -429,12 +474,14 @@ func chainSetupHandler(stream network.Stream) {
         return
     }
 
-    // Find ourself (the service this proxy represents) in the chain,
-    // and open connection to next service's proxy
+    // Find ourself (the service this proxy represents) in the chain, what
+    // transport protocol we should be using, and the next service in the
+    // (if it exists).
+    //   - Example chain spec: /tcp/service1/service2/udp/service3
     // TODO: Right now we assume a service is specified ONLY ONCE in the chain
     //       If we allow multiple occurrences, this will need to be re-designed
     // TODO: PREVENT LOOPED CHAIN SPECS!
-    var tpProto string
+    var tpProto, tpProtoThis string
     var nextServ string
     foundMe := false
     for _, token := range chainSpec {
@@ -442,6 +489,7 @@ func chainSetupHandler(stream network.Stream) {
             tpProto = token
         } else if token == service { // 'service' is currently global
             foundMe = true
+            tpProtoThis = tpProto
         } else if foundMe == true {
             nextServ = token
             break
@@ -458,14 +506,26 @@ func chainSetupHandler(stream network.Stream) {
         err = sendSetupACK(inSendRecv, REV_CHAIN_MSG_PREFIX + service)
         if err != nil {
             log.Printf("ERROR: Unable to send ACK to previous service\n%v\n", err)
+            return
         }
+
+        // Change protocol ID of input stream and invoke proper handler
+        if tpProtoThis == "udp" {
+            stream.SetProtocol(udpTunnelProtoID)
+            udpEndChainHandler(stream)
+        } else if tpProtoThis == "tcp" {
+            stream.SetProtocol(tcpTunnelProtoID)
+            tcpTunnelHandler(stream)
+        } else {
+            log.Printf("ERROR: Unknown transport protocol\n")
+        }
+
         return
     }
 
     // If the chain extends beyond this service, keep going.
     // Dial the next service and forward the chain setup message.
     log.Printf("The next service is: %s %s\n", tpProto, nextServ)
-
     log.Println("Looking for service with name", nextServ, "in hash-lookup")
     peerProxyID, err := resolveService(nextServ)
     if err != nil {
@@ -473,7 +533,7 @@ func chainSetupHandler(stream network.Stream) {
         return
     }
 
-    // Create output stream sender/receiver
+    // Create output stream sender/receiver to next service
     var outStream network.Stream
     if outStream, err = createStream(peerProxyID, chainSetupProtoID); err != nil {
         log.Printf("ERROR: Unable to dial target peer %s\n%v\n", peerProxyID, err)
@@ -501,6 +561,17 @@ func chainSetupHandler(stream network.Stream) {
         resMsg += " " + service
     }
     sendSetupACK(inSendRecv, resMsg)
+
+    // Change protocol ID of input & output streams and invoke proper handler
+    if tpProtoThis == "udp" {
+        outStream.SetProtocol(udpTunnelProtoID)
+        udpMidChainHandler(stream, outStream)
+    } else if tpProtoThis == "tcp" {
+        outStream.SetProtocol(tcpTunnelProtoID)
+        tcpTunnelHandler(stream)
+    } else {
+        log.Printf("ERROR: Unknown transport protocol\n")
+    }
 
     return
 }

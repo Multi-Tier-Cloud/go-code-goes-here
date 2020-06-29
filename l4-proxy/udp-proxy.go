@@ -1,16 +1,17 @@
 package main
 
 import (
+    "errors"
     "fmt"
     "io"
     "log"
     "net"
+    "strings"
     "sync"
     "syscall"
 
-    "github.com/libp2p/go-msgio"
+    //"github.com/libp2p/go-msgio"
     "github.com/libp2p/go-libp2p-core/network"
-    "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/protocol"
 )
 
@@ -39,25 +40,25 @@ func udpFwdStream2Conn(src network.Stream, dst net.Conn, dstAddr net.Addr) {
 
     var err error
     var nBytes, nBytesW, n int
-    buf := make([]byte, MAX_UDP_TUNNEL_PAYLOAD)
-    msgR := msgio.NewVarintReaderSize(src, len(buf))
+    var data []byte
+
+    srcComm := NewChainMsgCommunicator(src)
 
     for {
-        nBytesW = 0
-
-        nBytes, err = msgR.Read(buf)
-        if err != nil {
-            if err == syscall.EINVAL || err == io.EOF {
+        if data, err = receiveData(srcComm); err != nil {
+            log.Printf("ERROR: %v\n", err)
+            if errors.Is(err, syscall.EINVAL) || errors.Is(err, io.EOF) {
                 log.Printf("Connection %s <=> %s closed by remote",
                     src.Conn().LocalPeer(), src.Conn().RemotePeer())
             } else {
-                log.Printf("Unable to read from UDP connection %s <=> %s\n%v\n",
+                log.Printf("Unable to read from connection %s <=> %s\n%v\n",
                     src.Conn().LocalPeer(), src.Conn().RemotePeer(), err)
             }
             return
         }
-        data := buf[:nBytes]
 
+        nBytes = len(data)
+        nBytesW = 0
         for nBytesW < nBytes {
             if dstAddr != nil {
                 n, err = dst.(*net.UDPConn).WriteTo(data, dstAddr)
@@ -88,13 +89,12 @@ func udpFwdConn2Stream(src net.Conn, dst network.Stream) {
     }()
 
     var err error
-    var nBytes, nBytesW, n int
+    var nBytes int
     buf := make([]byte, MAX_UDP_TUNNEL_PAYLOAD)
-    msgW := msgio.NewVarintWriter(dst)
+
+    dstComm := NewChainMsgCommunicator(dst)
 
     for {
-        nBytesW = 0
-
         nBytes, err = src.Read(buf)
         if err != nil {
             if err == syscall.EINVAL || err == io.EOF {
@@ -107,40 +107,35 @@ func udpFwdConn2Stream(src net.Conn, dst network.Stream) {
         }
         data := buf[:nBytes]
 
-        for nBytesW < nBytes {
-            n, err = msgW.Write(data)
-            if err != nil {
-                if err == syscall.EINVAL {
-                    log.Printf("Connection %s <=> %s closed",
-                        dst.Conn().LocalPeer(), dst.Conn().RemotePeer())
-                } else {
-                    log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
-                        dst.Conn().LocalPeer(), dst.Conn().RemotePeer(), err)
-                }
-                return
+        if err = sendData(dstComm, data); err != nil {
+            if errors.Is(err, syscall.EINVAL) {
+                log.Printf("Connection %s <=> %s closed",
+                    dst.Conn().LocalPeer(), dst.Conn().RemotePeer())
+            } else {
+                log.Printf("ERROR: Unable to write to connection %s <=> %s\n%v\n",
+                    dst.Conn().LocalPeer(), dst.Conn().RemotePeer(), err)
             }
-
-            nBytesW += n
+            return
         }
     }
 }
 
 // Demultiplex incoming packets and forward them to destination
-func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer.ID) {
+func udpServiceProxy(lConn *net.UDPConn, chainSpec []string) {
     defer func() {
-        log.Printf("Shutting down proxy to peer %s\n", targetPeer)
+        log.Printf("Shutting down proxy for chain %s\n", chainSpec)
         lConn.Close()
     }()
 
     var err error
 
     // Since there's no per-client UDP connection object, we'll need to do some
-    // manual demultiplexing. Create a separate outgoing P2P stream to the
-    // same target service per unique client.
-    client2Stream := make(map[string]network.Stream)
+    // manual demultiplexing. Create a separate outgoing P2P stream, wrapped in
+    // a chainMsgCommunicator object, to the same target service per unique client.
+    client2ChainComm := make(map[string]*chainMsgCommunicator)
     var mapMtx sync.Mutex
 
-    // Use callbacks to remove streams from client2Stream
+    // Use callbacks to remove streams from client2ChainComm
     netCBs := network.NotifyBundle{}
     netCBs.ClosedStreamF = func(net network.Network, stream network.Stream) {
         if stream.Protocol() != udpTunnelProtoID {
@@ -151,27 +146,26 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
         defer mapMtx.Unlock()
 
         // TODO: Could speed this up with a reverse map (stream ID to client)
-        for k, v := range client2Stream {
-            if v == stream {
-                delete(client2Stream, k)
+        for k, v := range client2ChainComm {
+            if v.GetStream() == stream {
+                delete(client2ChainComm, k)
                 break
             }
         }
     }
-    p2pNet.Notify(&netCBs)
+    manager.Host.Host.Network().Notify(&netCBs)
 
     // Begin proxy operations
     var rConn network.Stream
     var exists bool
     var from net.Addr
-    var nBytes, nBytesW, n int
+    var nBytes int
     var writeRetry = false
-    var msgW msgio.WriteCloser
     buf := make([]byte, MAX_UDP_TUNNEL_PAYLOAD)
 
-    for {
-        nBytesW = 0
+    var dstComm *chainMsgCommunicator
 
+    for {
         // Read data from listening socket
         nBytes, from, err = lConn.ReadFrom(buf)
         if err != nil {
@@ -188,14 +182,23 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
 
         // Create per-client connection (stream) with remote service
         mapMtx.Lock()
-        if rConn, exists = client2Stream[from.String()]; !exists {
+        if dstComm, exists = client2ChainComm[from.String()]; !exists {
             log.Printf("New UDP conn: %s <=> %s\n", lConn.LocalAddr(), from)
 
-            if rConn, err = createStream(targetPeer, udpTunnelProtoID); err != nil {
-                log.Printf("ERROR: Unable to dial target peer %s\n%v\n", targetPeer, err)
+            // TODO: Each invocation of setupChain() may result in a new set of
+            //       instances if services along the old path goes down, or if
+            //       conditions and metrics change. Thus, it may have to set up
+            //       a new path. In such cases, this code currently suffers from
+            //       HOL blocking (i.e. a chain taking too long to set up will block
+            //       packets from other clients). It should be re-architected in
+            //       the future to avoid such a scenario, where each client is
+            //       handled independently.
+            if rConn, err = setupChain(chainSpec); err != nil {
+                log.Printf("ERROR: Unable to set up chain %s\n%v\n", chainSpec, err)
                 return
             }
-            client2Stream[from.String()] = rConn
+            dstComm = NewChainMsgCommunicator(rConn)
+            client2ChainComm[from.String()] = dstComm
 
             // Create separate goroutine to handle reverse path
             go udpFwdStream2Conn(rConn, lConn, from)
@@ -206,22 +209,21 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
 
         // Write data to P2P stream (attempt at most twice, see comments below)
         writeRetry = false
-        msgW = msgio.NewVarintWriter(rConn)
-        for nBytesW < nBytes {
-            n, err = msgW.Write(data)
-            if err != nil {
+        for {
+            if err = sendData(dstComm, data); err != nil {
+                rConn = dstComm.GetStream()
                 rConn.Reset()
                 if writeRetry == true {
                     // Already tried twice... give up, but first remove rConn
-                    delete(client2Stream, from.String())
+                    delete(client2ChainComm, from.String())
                     break
                 }
 
-                if err == syscall.EINVAL {
+                if errors.Is(err, syscall.EINVAL) {
                     log.Printf("Connection %s <=> %s closed",
                         rConn.Conn().LocalPeer(), rConn.Conn().RemotePeer())
                 } else {
-                    log.Printf("ERROR: Unable to write to UDP connection %s <=> %s\n%v\n",
+                    log.Printf("ERROR: Unable to write to connection %s <=> %s\n%v\n",
                         rConn.Conn().LocalPeer(), rConn.Conn().RemotePeer(), err)
                 }
 
@@ -229,31 +231,32 @@ func udpServiceProxy(p2pNet network.Network, lConn *net.UDPConn, targetPeer peer
                 //  1) Old stream may have been closed, but not yet timed out & removed by callback
                 //  2) Peer may have been restarted (or a momentary network disconnection)
                 // Attempt Write() again with newly created stream
-                mapMtx.Lock()
-                if rConn, err = createStream(targetPeer, udpTunnelProtoID); err != nil {
-                    log.Printf("ERROR: Unable to dial target peer %s\n%v\n", targetPeer, err)
+                if rConn, err = setupChain(chainSpec); err != nil {
+                    log.Printf("ERROR: Unable to set up chain %s\n%v\n", chainSpec, err)
                     return
                 }
-                client2Stream[from.String()] = rConn
+
+                mapMtx.Lock()
+                dstComm = NewChainMsgCommunicator(rConn)
+                client2ChainComm[from.String()] = dstComm
                 go udpFwdStream2Conn(rConn, lConn, from)
-                msgW = msgio.NewVarintWriter(rConn)
                 writeRetry = true
                 mapMtx.Unlock()
-
                 continue
             }
 
-            nBytesW += n
+            // This is really shit code that can be easily fixed with a goto...
+            break
         }
     }
 }
 
 
 // Open UDP tunnel to service and open local UDP listening port
-func openUDPProxy(servicePeer peer.ID) (string, error) {
+func openUDPProxy(chainSpec []string) (string, error) {
     var listenAddr string
-    serviceKey := "udp://" + string(servicePeer)
-    if _, exists := serv2Fwd[serviceKey]; !exists {
+    servChainKey := strings.Join(chainSpec, "/")
+    if _, exists := serv2Fwd[servChainKey]; !exists {
         udpAddr, err := net.ResolveUDPAddr("udp", ctrlHost + ":") // choose port
         if err != nil {
             return "", fmt.Errorf("Unable to resolve UDP address\n%w\n", err)
@@ -265,31 +268,43 @@ func openUDPProxy(servicePeer peer.ID) (string, error) {
         }
 
         listenAddr = lConn.LocalAddr().String()
-        serv2Fwd[serviceKey] = Forwarder {
+        serv2Fwd[servChainKey] = Forwarder {
             ListenAddr: listenAddr,
             udpWorker: udpServiceProxy,
         }
-        go serv2Fwd[serviceKey].udpWorker(manager.Host.Host.Network(), lConn, servicePeer)
+
+        // Pass a signal to the UDP worker to signal when the chain is set up
+        go serv2Fwd[servChainKey].udpWorker(lConn, chainSpec)
     } else {
-        listenAddr = serv2Fwd[serviceKey].ListenAddr
+        listenAddr = serv2Fwd[servChainKey].ListenAddr
     }
 
     return listenAddr, nil
 }
 
-// Handler for udpTunnelProtoID (i.e. invoked at destination proxy)
-// Make a connection to the local service and forward data to/from it
-func udpTunnelHandler(stream network.Stream) {
+func udpResolveAndDial(endpoint string) (net.Conn, error) {
     // Resolve and open connection to destination service
-    rAddr, err := net.ResolveUDPAddr("udp", servEndpoint)
+    rAddr, err := net.ResolveUDPAddr("udp", endpoint)
     if err != nil {
-        log.Printf("ERROR: Unable to resolve UDP target address %s\n%v\n", servEndpoint, err)
-        return
+        return nil, fmt.Errorf("Unable to resolve UDP target address %s\n%v\n", servEndpoint, err)
     }
 
     rConn, err := net.DialUDP("udp", nil, rAddr)
     if err != nil {
-        log.Printf("ERROR: Unable to dial UDP target address %s\n%v\n", rAddr, err)
+        return nil, fmt.Errorf("Unable to dial UDP target address %s\n%v\n", rAddr, err)
+    }
+
+    return rConn, nil
+}
+
+// Handler for udpTunnelProtoID (i.e. invoked at destination proxy)
+// Make a connection to the local service and forward data to/from it
+func udpEndChainHandler(stream network.Stream) {
+    log.Printf("Invoked new UDP EndChainHandler\n")
+
+    rConn, err := udpResolveAndDial(servEndpoint)
+    if err != nil {
+        log.Printf("ERROR: %v\n", err)
         return
     }
 
@@ -297,5 +312,22 @@ func udpTunnelHandler(stream network.Stream) {
     // Closing will be done within udpFwd* functions
     go udpFwdStream2Conn(stream, rConn, nil)
     go udpFwdConn2Stream(rConn, stream)
+}
+
+func udpMidChainHandler(inStream, outStream network.Stream) {
+    log.Printf("Invoked new UDP MidChainHandler\n")
+
+    rConn, err := udpResolveAndDial(servEndpoint)
+    if err != nil {
+        log.Printf("ERROR: %v\n", err)
+        return
+    }
+
+    // Forward data from the inStream to the service, from the service to the
+    // outStream, and from the outStream back to inStream.
+    // Closing will be done within udpFwd* functions
+    go udpFwdStream2Conn(inStream, rConn, nil)
+    go udpFwdConn2Stream(rConn, outStream)
+    go fwdStream2Stream(outStream, inStream)
 }
 
