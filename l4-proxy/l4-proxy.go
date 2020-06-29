@@ -219,7 +219,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // Check if this is a service chain, and set it up
-    err := setupChain(chainSpec)
+    _, err := setupChain(chainSpec)
     if err != nil {
         http.Error(w, "Bad Request", http.StatusBadRequest)
         log.Printf("ERROR: Chain setup failed\n%v\n", err)
