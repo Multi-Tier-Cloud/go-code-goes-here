@@ -63,7 +63,7 @@ type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
     tcpWorker   func(net.Listener, peer.ID)
-    udpWorker   func(network.Network, *net.UDPConn, peer.ID)
+    udpWorker   func(*net.UDPConn, []string)
 }
 
 // Maps a remote addr to existing ServiceProxy for that addr
@@ -198,6 +198,8 @@ func resolveService(servName string) (peer.ID, error) {
 
 // Handles the setting up proxies to services
 func requestHandler(w http.ResponseWriter, r *http.Request) {
+    var err error
+
     log.Println("Got request:", r.URL.RequestURI())
 
     // 1. Find service information and arguments from URL
@@ -218,16 +220,6 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Check if this is a service chain, and set it up
-    _, err := setupChain(chainSpec)
-    if err != nil {
-        http.Error(w, "Bad Request", http.StatusBadRequest)
-        log.Printf("ERROR: Chain setup failed\n%v\n", err)
-        return
-    }
-
-    return // REMOVE LATER
-
     // Since we're in the HTTP handler, we know the chain has not been set up
     tpProto := chainSpec[0]
     switch tpProto {
@@ -238,35 +230,16 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    serviceName := chainSpec[1]
-    log.Printf("Requested protocol is: %s\n", tpProto)
-    log.Printf("Requested service is: %s\n", serviceName)
-
-    log.Println("Looking for service with name", serviceName, "in hash-lookup")
-    info, err := registry.GetServiceWithHostRouting(
-        manager.Host.Ctx, manager.Host.Host,
-        manager.Host.RoutingDiscovery, serviceName,
-    )
-    if err != nil {
-        http.Error(w, "404 Not Found in hash lookup", http.StatusNotFound)
-        fmt.Fprintf(w, "%s\n", err)
-        log.Printf("ERROR: Hash lookup failed\n%s\n", err)
-        return
-    }
-
-    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash)
-    if err != nil {
-        http.Error(w, "404 Service Not Found", http.StatusNotFound)
-        return
-    }
-
     // Open TCP/UDP tunnel to service and open local TCP listening port
     // Start separate goroutine for handling connections and proxying to service
     var listenAddr string
     if tpProto == "tcp" {
-        listenAddr, err = openTCPProxy(peerProxyID)
+        //listenAddr, err = openTCPProxy(peerProxyID)
+        http.Error(w, "TCP chaining currently disabled", http.StatusMethodNotAllowed)
+        log.Printf("ERROR: TCP chaining currently disabled\n")
+        return
     } else if tpProto == "udp" {
-        listenAddr, err = openUDPProxy(peerProxyID)
+        listenAddr, err = openUDPProxy(chainSpec)
     } else {
         // Should not get here
         http.Error(w, "Unknown transport protocol", http.StatusInternalServerError)
@@ -424,12 +397,6 @@ func main() {
     nodeConfig.PrivKey = priv
     nodeConfig.BootstrapPeers = *bootstraps
     nodeConfig.PSK = *psk
-
-    // Set up TCP and UDP handlers
-    nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, tcpTunnelProtoID)
-    nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, tcpTunnelHandler)
-    nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, udpTunnelProtoID)
-    nodeConfig.StreamHandlers = append(nodeConfig.StreamHandlers, udpTunnelHandler)
 
     // Set up chain setup handler
     nodeConfig.HandlerProtocolIDs = append(nodeConfig.HandlerProtocolIDs, chainSetupProtoID)
