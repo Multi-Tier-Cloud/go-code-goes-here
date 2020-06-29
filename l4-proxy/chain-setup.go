@@ -54,10 +54,21 @@ type ChainMsg struct {
     Data    []byte
 }
 
+func NewChainError(err error) *ChainMsg {
+    msg := &ChainMsg{Type: Error}
+    if err2 := EncodeChainData(msg, err.Error()); err2 != nil {
+        log.Printf("ERROR: Unable to encode error message into %s " +
+                    "message\n%v\n", Error, err2)
+    }
+
+    return msg
+}
+
 func NewChainSetupRequest(chainSpec []string) *ChainMsg {
     msg := &ChainMsg{Type: SetupRequest}
     if err := EncodeChainData(msg, chainSpec); err != nil {
-        log.Printf("ERROR: Unable to encode chain spec into SetupRequest message\n%v", err)
+        log.Printf("ERROR: Unable to encode chain spec into %s " +
+                    "message\n%v\n", SetupRequest, err)
         return nil
     }
 
@@ -68,11 +79,20 @@ func NewChainSetupRequest(chainSpec []string) *ChainMsg {
 // If not used, simply provide an empty string (i.e. "")
 func NewChainSetupACK(debug string) *ChainMsg {
     msg := &ChainMsg{Type: SetupACK}
-    if len(debug) > 0 {
-        if err := EncodeChainData(msg, debug); err != nil {
-            // ACK message without debug msg is still valid, so just warn
-            log.Printf("WARNING: Unable to encode debug string into SetupACK message\n")
-        }
+    if err := EncodeChainData(msg, debug); err != nil {
+        // ACK message without debug msg is still valid, so just warn
+        log.Printf("WARNING: Unable to encode debug string into %s " +
+                    "message\n%v\n", SetupACK, err)
+    }
+
+    return msg
+}
+
+func NewChainData(data []byte) *ChainMsg {
+    msg := &ChainMsg{Type: Data}
+    if err := EncodeChainData(msg, data); err != nil {
+        log.Printf("ERROR: Unable to encode data into %s " +
+                    "message\n%v\n", Data, err)
     }
 
     return msg
@@ -88,12 +108,14 @@ func EncodeChainData(msg *ChainMsg, obj interface{}) error {
         } else if str, ok := obj.(string); ok {
             msg.Data = []byte(str)
         } else {
-            return fmt.Errorf("ChainMsg type %s can only encode data of type 'error' or 'string'")
+            return fmt.Errorf("ChainMsg type %s can only encode data of " +
+                                "type 'error' or 'string'", msg.Type)
         }
     case SetupRequest:
         chainSpec, ok := obj.([]string)
         if !ok {
-            return fmt.Errorf("ChainMsg type %s can only encode data of type '[]string'")
+            return fmt.Errorf("ChainMsg type %s can only encode data of " +
+                                "type '[]string'", msg.Type)
         }
         var buf bytes.Buffer
         enc := gob.NewEncoder(&buf)
@@ -101,16 +123,21 @@ func EncodeChainData(msg *ChainMsg, obj interface{}) error {
         msg.Data = buf.Bytes()
     case SetupACK:
         // Expect obj to be type: string
-        debugStr, ok := obj.(string);
+        debugStr, ok := obj.(string)
         if !ok {
-            return fmt.Errorf("ChainMsg type %s can only encode data of type 'string'")
+            return fmt.Errorf("ChainMsg type %s can only encode data of " +
+                                "type 'string'", msg.Type)
         }
         msg.Data = []byte(debugStr)
     case Data:
-        // TODO
-        fmt.Printf("TO DO\n")
+        dataBytes, ok := obj.([]byte)
+        if !ok {
+            return fmt.Errorf("ChainMsg type %s can only encode data of " +
+                                "type '[]byte'", msg.Type)
+        }
+        msg.Data = dataBytes
     default:
-        return fmt.Errorf("Unknown chain message type: %s\n")
+        return fmt.Errorf("Unknown chain message type: %s\n", msg.Type)
     }
 
     return nil
@@ -121,8 +148,6 @@ func DecodeChainData(msg *ChainMsg) (interface{}, error) {
         return nil, fmt.Errorf("ERROR: msg == nil\n")
     }
 
-    buf := bytes.NewBuffer(msg.Data)
-    dec := gob.NewDecoder(buf)
 
     switch msg.Type {
     case Error:
@@ -130,14 +155,15 @@ func DecodeChainData(msg *ChainMsg) (interface{}, error) {
         return fmt.Errorf(errStr), nil
     case SetupRequest:
         var chainSpec []string
+        dec := gob.NewDecoder(bytes.NewBuffer(msg.Data))
         dec.Decode(&chainSpec)
         return chainSpec, nil
     case SetupACK:
         debug := string(msg.Data)
         return debug, nil
     case Data:
-        // TODO
-        return nil, nil
+        msgBytes := msg.Data
+        return msgBytes, nil
     default:
         return nil, fmt.Errorf("ERROR: Unknown chain message type: %d\n")
     }
@@ -184,7 +210,7 @@ func NewChainMsgCommunicator (stream network.Stream) *chainMsgCommunicator {
     // Use msgio for proper framing
     // Keep separate handles for each so we can close independently
     cmComm.msgRWC = msgio.Combine(msgio.NewVarintWriter(stream),
-                                    msgio.NewVarintReader(stream))
+                                    msgio.NewVarintReaderSize(stream, MAX_UDP_TUNNEL_PAYLOAD))
 
     // Use gob for encoding/decoding
     cmComm.dec = gob.NewDecoder(cmComm.msgRWC)
@@ -211,8 +237,17 @@ func (cmsr *chainMsgCommunicator) GetStream() network.Stream {
 
 // TODO: Wrap the following functions in a "NFV" structure?
 //       It'd be responsible for managing the 3 connections (input/output/service)
-// NOTE: This function is asynchronous (i.e. will send and simply return, will
-//       not wait for a SetupACK)
+// NOTE: The send* functions are asynchronous (i.e. will send and simply return,
+//       and will not wait for a response)
+func sendError(cmsr *chainMsgCommunicator, err error) error {
+    errMsg := NewChainError(err)
+    if err2 := cmsr.Send(errMsg); err2 != nil {
+        return fmt.Errorf("Attempt to send %s message failed\n%w\n", errMsg.Type, err2)
+    }
+
+    return nil
+}
+
 func sendSetupRequest(cmsr *chainMsgCommunicator, chainSpec []string) error {
     setupMsg := NewChainSetupRequest(chainSpec)
     if err := cmsr.Send(setupMsg); err != nil {
@@ -286,10 +321,44 @@ func receiveSetupACK(cmsr *chainMsgCommunicator) (string, error) {
     return debugStr, nil
 }
 
+func sendData(cmsr *chainMsgCommunicator, data []byte) error {
+    dataMsg := NewChainData(data)
+    if err := cmsr.Send(dataMsg); err != nil {
+        return fmt.Errorf("Attempt to send %s message failed\n%w\n", dataMsg.Type, err)
+    }
+
+    return nil
+}
+
+func receiveData(cmsr *chainMsgCommunicator) ([]byte, error) {
+    msg, err := cmsr.Recv()
+    if err != nil {
+        return nil, fmt.Errorf("Unable to receive chain message\n%w\n", err);
+    }
+
+    if !expectTypePrintErr(msg, Data) {
+        return nil, fmt.Errorf("Received ChainMsg was not type %s\n", SetupACK)
+    }
+
+    msgData, err := DecodeChainData(msg)
+    if err != nil {
+        return nil, fmt.Errorf("Unable to decode chain message\n%w\n", err)
+    }
+
+    // Type asserting slices returns a pointer to the slice, thus avoiding copies
+    msgBytes, ok := msgData.([]byte)
+    if !ok {
+        return nil, fmt.Errorf("Expected data in %s message to be type '[]byte', " +
+                    "but was type '%T'\n", msg.Type, msgData)
+    }
+
+    return msgBytes, nil
+}
+
 // Function for source (client) proxy to begin chain setup operation
-func setupChain(chainSpec []string) error {
+func setupChain(chainSpec []string) (network.Stream, error) {
     if len(chainSpec) < 2 {
-        return fmt.Errorf("Chain spec must contain at least two tokens " +
+        return nil, fmt.Errorf("Chain spec must contain at least two tokens " +
             "(transport protocol and a service name)\n")
     }
 
@@ -303,7 +372,7 @@ func setupChain(chainSpec []string) error {
     case "udp", "tcp": // do nothing
     default:
         log.Printf("ERROR: Unrecognized transport protocol: %s\n", tpProto)
-        return fmt.Errorf("Expecting protocol to be either 'tcp' or 'udp'\n")
+        return nil, fmt.Errorf("Expecting protocol to be either 'tcp' or 'udp'\n")
     }
 
     log.Printf("Requested protocol is: %s\n", tpProto)
@@ -313,7 +382,7 @@ func setupChain(chainSpec []string) error {
     if err != nil {
         err = fmt.Errorf("Unable to resolve service %s\n%w\n", servName, err)
         log.Printf("ERROR: %v", err)
-        return err
+        return nil, err
     }
 
     // Send chain setup request
@@ -321,7 +390,7 @@ func setupChain(chainSpec []string) error {
     if stream, err = createStream(peerProxyID, chainSetupProtoID); err != nil {
         err = fmt.Errorf("Unable to open stream to peer %s\n%w\n", peerProxyID, err)
         log.Printf("ERROR: %v", err)
-        return err
+        return nil, err
     }
 
     sendRecv := NewChainMsgCommunicator(stream)
@@ -336,14 +405,14 @@ func setupChain(chainSpec []string) error {
     if err != nil {
         err = fmt.Errorf("Unable to receive chain SetupACK\n%w\n", err)
         log.Printf("ERROR: %v\n", err)
-        return err
+        return nil, err
     }
 
     if resMsg != "" {
         log.Printf("Message received: %s\n", resMsg)
     }
 
-    return nil
+    return stream, nil
 }
 
 // Handler for chainSetupProtoID (i.e. invoked at destination proxy)
