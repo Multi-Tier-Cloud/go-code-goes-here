@@ -502,7 +502,7 @@ func chainSetupHandler(stream network.Stream) {
     } else if foundMe == true && nextServ == "" {
         // This is the destination service
         // Return msg to previous proxy acknowledging setup
-        log.Printf("End of chain reached, sending SetupACK back\n")
+        log.Printf("End of chain reached, sending SetupACK back...\n")
         err = sendSetupACK(inSendRecv, REV_CHAIN_MSG_PREFIX + service)
         if err != nil {
             log.Printf("ERROR: Unable to send ACK to previous service\n%v\n", err)
@@ -515,7 +515,7 @@ func chainSetupHandler(stream network.Stream) {
             udpEndChainHandler(stream)
         } else if tpProtoThis == "tcp" {
             stream.SetProtocol(tcpTunnelProtoID)
-            tcpTunnelHandler(stream)
+            tcpEndChainHandler(stream)
         } else {
             log.Printf("ERROR: Unknown transport protocol\n")
         }
@@ -543,6 +543,7 @@ func chainSetupHandler(stream network.Stream) {
     outSendRecv := NewChainMsgCommunicator(outStream)
 
     // Forward chain setup request
+    log.Printf("Middle of chain reached, forwarding SetupRequest...\n")
     if err = sendSetupRequest(outSendRecv, chainSpec); err != nil {
         log.Printf("ERROR: sendSetupRequest() failed\n%v\n", err)
         return
@@ -560,6 +561,7 @@ func chainSetupHandler(stream network.Stream) {
     if strings.HasPrefix(resMsg, REV_CHAIN_MSG_PREFIX) {
         resMsg += " " + service
     }
+    log.Printf("Chain SetupACK received, reverse forwarding SetupACK...\n")
     sendSetupACK(inSendRecv, resMsg)
 
     // Change protocol ID of input & output streams and invoke proper handler
@@ -568,7 +570,7 @@ func chainSetupHandler(stream network.Stream) {
         udpMidChainHandler(stream, outStream)
     } else if tpProtoThis == "tcp" {
         outStream.SetProtocol(tcpTunnelProtoID)
-        tcpTunnelHandler(stream)
+        tcpMidChainHandler(stream, outStream)
     } else {
         log.Printf("ERROR: Unknown transport protocol\n")
     }

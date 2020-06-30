@@ -62,11 +62,11 @@ var cache pcache.PeerCache
 type Forwarder struct {
     // Use TCPAddr instead for endpoint addresses?
     ListenAddr  string
-    tcpWorker   func(net.Listener, peer.ID)
+    tcpWorker   func(net.Listener, []string)
     udpWorker   func(*net.UDPConn, []string)
 }
 
-// Maps a remote addr to existing ServiceProxy for that addr
+// Maps a remote addr to existing Forwarder for that addr
 var serv2Fwd = make(map[string]Forwarder)
 
 func findOrAllocate(serviceHash, dockerHash string) (peer.ID, error) {
@@ -234,10 +234,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     // Start separate goroutine for handling connections and proxying to service
     var listenAddr string
     if tpProto == "tcp" {
-        //listenAddr, err = openTCPProxy(peerProxyID)
-        http.Error(w, "TCP chaining currently disabled", http.StatusMethodNotAllowed)
-        log.Printf("ERROR: TCP chaining currently disabled\n")
-        return
+        listenAddr, err = openTCPProxy(chainSpec)
     } else if tpProto == "udp" {
         listenAddr, err = openUDPProxy(chainSpec)
     } else {
