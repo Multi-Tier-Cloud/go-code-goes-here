@@ -23,7 +23,7 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
-    "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
+    "github.com/Multi-Tier-Cloud/service-registry/registry"
 
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
@@ -180,7 +180,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     log.Println("Looking for service with name", serviceName, "in hash-lookup")
-    serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
+    info, err := registry.GetServiceWithHostRouting(
         manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, serviceName,
     )
@@ -191,7 +191,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    peerProxyID, err := findOrAllocate(serviceHash, dockerHash, r)
+    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash, r)
     if err != nil {
         http.Error(w, "404 Service Not Found", http.StatusNotFound)
         return

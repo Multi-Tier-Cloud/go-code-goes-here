@@ -23,7 +23,7 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
-    "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
+    "github.com/Multi-Tier-Cloud/service-registry/registry"
 
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
@@ -138,7 +138,7 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
     log.Println("Looking for service with name", serviceName, "in hash-lookup")
-    serviceHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
+    info, err := registry.GetServiceWithHostRouting(
         manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, serviceName,
     )
@@ -150,7 +150,7 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     // Run request
-    resp, err := runRequest(serviceHash, dockerHash, r)
+    resp, err := runRequest(info.ContentHash, info.DockerHash, r)
     if resp != nil {
         defer resp.Body.Close()
     }

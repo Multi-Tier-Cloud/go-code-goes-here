@@ -17,7 +17,7 @@ import (
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
-    "github.com/Multi-Tier-Cloud/hash-lookup/hashlookup"
+    "github.com/Multi-Tier-Cloud/service-registry/registry"
 )
 
 //  for p2pnode.Node and also related
@@ -369,10 +369,11 @@ func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
     cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerRequestProtID)
     if serviceName != "" {
         // Set rendezvous to service hash value
-        node.P2PHash, _, err = hashlookup.GetHash(cfg.BootstrapPeers, cfg.PSK, serviceName)
+        info, err := registry.GetService(cfg.BootstrapPeers, cfg.PSK, serviceName)
         if err != nil {
             return node, err
         }
+        node.P2PHash = info.ContentHash
         cfg.Rendezvous = append(cfg.Rendezvous, node.P2PHash)
     }
     node.Host, err = p2pnode.NewNode(ctx, cfg)
