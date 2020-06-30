@@ -176,7 +176,7 @@ func createStream(targetPeer peer.ID, proto protocol.ID) (network.Stream, error)
 // if necessary.
 func resolveService(servName string) (peer.ID, error) {
     log.Println("Looking for service with name", servName, "in hash-lookup")
-    servHash, dockerHash, err := hashlookup.GetHashWithHostRouting(
+    info, err := registry.GetServiceWithHostRouting(
         manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, servName)
 
@@ -186,11 +186,11 @@ func resolveService(servName string) (peer.ID, error) {
                                 servName, err)
     }
 
-    peerProxyID, err := findOrAllocate(servHash, dockerHash)
+    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash)
     if err != nil {
         //log.Printf("ERROR: Unable to find or allocate service %s (%s)\n%v\n", servName, servHash, err)
         return "", fmt.Errorf("ERROR: Unable to find or allocate service %s (%s)\n%v\n",
-                                servName, servHash, err)
+                                servName, info.ContentHash, err)
     }
 
     return peerProxyID, nil
