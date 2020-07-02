@@ -6,6 +6,7 @@
 package main
 
 import (
+    "bufio"
     "bytes"
     "encoding/gob"
     "errors"
@@ -198,7 +199,6 @@ func expectTypePrintErr(cm *ChainMsg, ct ChainMsgType) bool {
 // msgio is used for framing, while gob is used for encoding/decoding objects
 type chainMsgCommunicator struct {
     stream  network.Stream
-    msgRWC  msgio.ReadWriteCloser
     enc     *gob.Encoder
     dec     *gob.Decoder
 }
@@ -211,13 +211,17 @@ func NewChainMsgCommunicator (stream network.Stream) *chainMsgCommunicator {
     cmComm := chainMsgCommunicator{stream: stream,}
 
     // Use msgio for proper framing
-    // Keep separate handles for each so we can close independently
-    cmComm.msgRWC = msgio.Combine(msgio.NewVarintWriter(stream),
-                                    msgio.NewVarintReaderSize(stream, MAX_UDP_TUNNEL_PAYLOAD))
+    // NOTE: When passing an io.Reader to gob.NewDecoder() later on, it wraps
+    //       the Reader in a new bufio.Reader object created with a default
+    //       buffer size of 4k. This limit prevents us from sending any frames
+    //       larger than 4k. Thus, we pre-emptively wrap it ourselves here,
+    //       providing a much larger size.
+    bufVarintReader := bufio.NewReaderSize(msgio.NewVarintReader(stream),
+                                            MAX_UDP_TUNNEL_PAYLOAD)
 
     // Use gob for encoding/decoding
-    cmComm.dec = gob.NewDecoder(cmComm.msgRWC)
-    cmComm.enc = gob.NewEncoder(cmComm.msgRWC)
+    cmComm.dec = gob.NewDecoder(bufVarintReader)
+    cmComm.enc = gob.NewEncoder(msgio.NewVarintWriter(stream))
 
     return &cmComm
 }
