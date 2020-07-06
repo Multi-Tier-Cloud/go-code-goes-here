@@ -118,6 +118,7 @@ func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
                 // Check if the current peer is the one to delete
                 if id == p.Info.ID && address == p.Address {
                     cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+                    // No need to decrement i after rpfs since we're going to return
                     return
                 }
                 count++
@@ -158,19 +159,21 @@ func (cache *PeerCache) updateCache() {
     nLevels := cache.NLevels
     // First pass: update RCounts
     for l := uint(0); l < nLevels; l++ {
-        for i, p := range cache.Levels[l] {
+        for i := 0; i < len(cache.Levels[l]); i++ {
             // Ping peers to check performance
             // TODO: set timeout based on performance requirement
-            responseChan := ping.Ping(ctx, cache.node.Host, p.Info.ID)
+            responseChan := ping.Ping(ctx, cache.node.Host, cache.Levels[l][i].Info.ID)
             result := <-responseChan
             // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
             if result.RTT == 0 || p2putil.PerfIndCompare(cache.ReqPerf.HardReq, perf) {
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
+                // Decrement i to account for rpfs
+                i--
             // If peer is up and doesn't meet requirements decrement RCount by 10
             } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
                 cache.Levels[l][i].Info.Perf = perf
-                if p.RCount < 10 {
+                if cache.Levels[l][i].RCount < 10 {
                     cache.Levels[l][i].RCount = 0
                 } else {
                     cache.Levels[l][i].RCount -= 10
@@ -178,7 +181,7 @@ func (cache *PeerCache) updateCache() {
             // If it does meet requirements then increment RCount
             } else {
                 cache.Levels[l][i].Info.Perf = perf
-                if p.RCount < 100 {
+                if cache.Levels[l][i].RCount < 100 {
                     cache.Levels[l][i].RCount++
                 }
             }
