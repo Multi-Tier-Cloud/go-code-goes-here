@@ -11,6 +11,7 @@ require (
 	github.com/gorilla/mux v1.7.4 // indirect
 	github.com/libp2p/go-libp2p v0.9.2
 	github.com/libp2p/go-libp2p-core v0.5.6
+	github.com/libp2p/go-libp2p-discovery v0.4.0
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/multiformats/go-multiaddr v0.2.2

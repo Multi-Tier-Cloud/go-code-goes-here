@@ -1,13 +1,26 @@
 package rcache
 
 import (
+	"context"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/libp2p/go-libp2p-core/host"
+    "github.com/libp2p/go-libp2p-discovery"
 
 	"github.com/Multi-Tier-Cloud/service-registry/registry"
 )
 
+func init() {
+    log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
+}
+
 type RegistryCache struct {
+	ctx context.Context
+	host host.Host
+	routingDiscovery *discovery.RoutingDiscovery
+
 	ttl time.Duration // time-to-live
 	data map[string]cacheEntry
 	mux sync.RWMutex
@@ -19,8 +32,13 @@ type cacheEntry struct {
 }
 
 // ttl: time-to-live in seconds
-func NewRegistryCache(ttl int) *RegistryCache {
+func NewRegistryCache(ctx context.Context, host host.Host,
+	routingDiscovery *discovery.RoutingDiscovery, ttl int) *RegistryCache {
+
 	return &RegistryCache{
+		ctx: ctx,
+		host: host,
+		routingDiscovery: routingDiscovery,
 		ttl: time.Duration(ttl) * time.Second,
 		data: make(map[string]cacheEntry),
 	}
@@ -56,6 +74,18 @@ func (rc *RegistryCache) Delete(serviceName string) {
 	rc.mux.Unlock()
 }
 
-func (rc *RegistryCache) UpdateCache() {
-
+// Try to get service info from cache
+// If not in cache, request it from registry-service
+func (rc *RegistryCache) GetOrRequestService(serviceName string) (info registry.ServiceInfo, err error) {
+    log.Println("Looking for service with name", serviceName, "in registry cache")
+    info, ok := rc.Get(serviceName)
+    if !ok {
+        log.Println("Not cached, try querying registry-service")
+        info, err = registry.GetServiceWithHostRouting(rc.ctx, rc.host, rc.routingDiscovery, serviceName)
+        if err != nil {
+            return info, err
+        }
+        rc.Add(serviceName, info)
+	}
+	return info, nil
 }

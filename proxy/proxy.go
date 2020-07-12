@@ -23,8 +23,6 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
-    "github.com/Multi-Tier-Cloud/service-registry/registry"
-
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
@@ -141,24 +139,12 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
-    // Define err here so in the following if statement, we don't need to use :=
-    // which would shadow the info variable
-    var err error
-    log.Println("Looking for service with name", serviceName, "in registry cache")
-    info, ok := registryCache.Get(serviceName)
-    if !ok {
-        log.Println("Looking for service with name", serviceName, "in registry-service")
-        info, err = registry.GetServiceWithHostRouting(
-            manager.Host.Ctx, manager.Host.Host,
-            manager.Host.RoutingDiscovery, serviceName,
-        )
-        if err != nil {
-            http.Error(w, "404 Not Found", http.StatusNotFound)
-            fmt.Fprintf(w, "%s\n", err)
-            log.Printf("ERROR: Registry lookup failed\n%s\n", err)
-            return
-        }
-        registryCache.Add(serviceName, info)
+    info, err := registryCache.GetOrRequestService(serviceName)
+    if err != nil {
+        http.Error(w, "404 Not Found", http.StatusNotFound)
+        fmt.Fprintf(w, "%s\n", err)
+        log.Printf("ERROR: Registry lookup failed\n%s\n", err)
+        return
     }
     // Run request
     resp, err := runRequest(info.ContentHash, info.DockerHash, r)
@@ -362,7 +348,8 @@ func main() {
     go cache.UpdateCache()
 
     // Setup registry cache
-    registryCache = rcache.NewRegistryCache(rcacheTTL)
+    registryCache = rcache.NewRegistryCache(manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, rcacheTTL)
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
