@@ -18,9 +18,10 @@ type cacheEntry struct {
 	Expiry time.Time
 }
 
-func NewRegistryCache(ttl time.Duration) *RegistryCache {
+// ttl: time-to-live in seconds
+func NewRegistryCache(ttl int) *RegistryCache {
 	return &RegistryCache{
-		ttl: ttl,
+		ttl: time.Duration(ttl) * time.Second,
 		data: make(map[string]cacheEntry),
 	}
 }
