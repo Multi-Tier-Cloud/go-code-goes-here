@@ -23,11 +23,10 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
-    "github.com/Multi-Tier-Cloud/service-registry/registry"
-
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
+    "github.com/Multi-Tier-Cloud/service-manager/rcache"
 )
 
 const defaultKeyFile = "~/.privKeyProxy"
@@ -41,6 +40,9 @@ var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
+
+// Global Registry Cache instance to cache service registry info
+var registryCache *rcache.RegistryCache
 
 func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Response, error) {
     var err error
@@ -66,7 +68,7 @@ func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Respon
 
             // TODO: Always pass perf req into AllocService()
             //       Need to combine AllocService and AllocBetterService
-            //       Need to obtain perf req from hash-lookup service
+            //       Need to obtain perf req from registry-service
             log.Println("Finding best existing service instance")
             id, serviceAddress, perf, err = manager.FindService(serviceHash)
             if err != nil {
@@ -137,18 +139,13 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     log.Println(tokens)
     // tokens[0] should be an empty string from parsing the initial "/"
     serviceName := tokens[1]
-    log.Println("Looking for service with name", serviceName, "in hash-lookup")
-    info, err := registry.GetServiceWithHostRouting(
-        manager.Host.Ctx, manager.Host.Host,
-        manager.Host.RoutingDiscovery, serviceName,
-    )
+    info, err := registryCache.GetOrRequestService(serviceName)
     if err != nil {
         http.Error(w, "404 Not Found", http.StatusNotFound)
         fmt.Fprintf(w, "%s\n", err)
-        log.Printf("ERROR: Hash lookup failed\n%s\n", err)
+        log.Printf("ERROR: Registry lookup failed\n%s\n", err)
         return
     }
-
     // Run request
     resp, err := runRequest(info.ContentHash, info.DockerHash, r)
     if resp != nil {
@@ -226,6 +223,8 @@ func main() {
     // Argument options
     var configPath string
     flag.StringVar(&configPath, "configfile", "../conf/conf.json", "Path to configuration file to use")
+    var rcacheTTL int
+    flag.IntVar(&rcacheTTL, "rcache-ttl", 3600, "Time-to-live in seconds for registry cache entries")
 
     var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
@@ -337,7 +336,7 @@ func main() {
         log.Fatalf("ERROR: Unable to create LCA Manager\n%s", err)
     }
 
-    // Setup cache
+    // Setup peer cache
     config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
     config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
     log.Println("Launching proxy PeerCache instance")
@@ -347,6 +346,10 @@ func main() {
     cache = pcache.NewPeerCache(config.Perf, &manager.Host)
     // Boot up cache managment function
     go cache.UpdateCache()
+
+    // Setup registry cache
+    registryCache = rcache.NewRegistryCache(manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, rcacheTTL)
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
