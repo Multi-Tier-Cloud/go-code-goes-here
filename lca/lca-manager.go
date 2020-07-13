@@ -364,21 +364,25 @@ func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
 
     var node LCAManager
 
-    // Set stream handler, protocol ID, and hash to advertise
+    // Set stream handler, protocol ID and create the node
     cfg.StreamHandlers = append(cfg.StreamHandlers, RequestHandler(serviceAddress))
     cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerRequestProtID)
+    node.Host, err = p2pnode.NewNode(ctx, cfg)
+    if err != nil {
+        return node, err
+    }
+
+    // Now that the node is created, it can be used to get the rendezvous
+    // without the need to create a separate node for GetService
     if serviceName != "" {
         // Set rendezvous to service hash value
-        info, err := registry.GetService(cfg.BootstrapPeers, cfg.PSK, serviceName)
+        info, err := registry.GetServiceWithHostRouting(node.Host.Ctx,
+                         node.Host.Host, node.Host.RoutingDiscovery, serviceName)
         if err != nil {
             return node, err
         }
         node.P2PHash = info.ContentHash
-        cfg.Rendezvous = append(cfg.Rendezvous, node.P2PHash)
-    }
-    node.Host, err = p2pnode.NewNode(ctx, cfg)
-    if err != nil {
-        return node, err
+        node.Host.Advertise(node.P2PHash)
     }
 
     return node, nil
