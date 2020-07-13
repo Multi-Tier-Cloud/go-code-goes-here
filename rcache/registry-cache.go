@@ -1,5 +1,8 @@
 package rcache
 
+// Cache registry service info
+// Keeps track of when entries get cached and expires entries after a specified TTL
+
 import (
 	"context"
 	"log"
@@ -31,6 +34,8 @@ type cacheEntry struct {
 	Expiry time.Time
 }
 
+// Create new RegistryCache
+// ctx, host, routingDiscovery: used when you call GetOrRequestService() to contact registry-service
 // ttl: time-to-live in seconds
 func NewRegistryCache(ctx context.Context, host host.Host,
 	routingDiscovery *discovery.RoutingDiscovery, ttl int) *RegistryCache {
@@ -44,6 +49,8 @@ func NewRegistryCache(ctx context.Context, host host.Host,
 	}
 }
 
+// Maps serviceName to info in cache
+// Sets expiry by checking current time and adding TTL
 func (rc *RegistryCache) Add(serviceName string, info registry.ServiceInfo) {
 	entry := cacheEntry{
 		Info: info,
@@ -54,6 +61,8 @@ func (rc *RegistryCache) Add(serviceName string, info registry.ServiceInfo) {
 	rc.mux.Unlock()
 }
 
+// If serviceName entry doesn't exist in cache or is expired, ok is false
+// Otherwise, returns mapped ServiceInfo and ok is true
 func (rc *RegistryCache) Get(serviceName string) (info registry.ServiceInfo, ok bool) {
 	rc.mux.RLock()
 	entry, ok := rc.data[serviceName]
@@ -68,6 +77,7 @@ func (rc *RegistryCache) Get(serviceName string) (info registry.ServiceInfo, ok 
 	return entry.Info, true
 }
 
+// Delete entry from cache
 func (rc *RegistryCache) Delete(serviceName string) {
 	rc.mux.Lock()
 	delete(rc.data, serviceName)
@@ -75,12 +85,12 @@ func (rc *RegistryCache) Delete(serviceName string) {
 }
 
 // Try to get service info from cache
-// If not in cache, request it from registry-service
+// If not in cache or expired, request it from registry-service and add it to cache
 func (rc *RegistryCache) GetOrRequestService(serviceName string) (info registry.ServiceInfo, err error) {
     log.Println("Looking for service with name", serviceName, "in registry cache")
     info, ok := rc.Get(serviceName)
     if !ok {
-        log.Println("Not cached, try querying registry-service")
+        log.Println("Not cached or expired, try querying registry-service")
         info, err = registry.GetServiceWithHostRouting(rc.ctx, rc.host, rc.routingDiscovery, serviceName)
         if err != nil {
             return info, err
