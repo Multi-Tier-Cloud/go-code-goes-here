@@ -2,10 +2,12 @@ package lca
 
 import (
     "bufio"
+    "bytes"
     "context"
     "errors"
     "fmt"
     "io"
+    "io/ioutil"
     "net/http"
     "regexp"
     "runtime/debug"
@@ -152,6 +154,8 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
     return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
 }
 
+// TODO: Move this outside of LCAManager to a more general structure or library?
+//       It's not relevant to controlling the lifecycle of virtual resources.
 // Finds the best service instance by pinging other LCA Manager instances
 func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
     log.Println("Finding providers for:", serviceHash)
@@ -173,38 +177,10 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
     }
 
     return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
-
-    // DEPRECATED
-    // TODO: Now that proxy-to-proxy is enabled, remove the code below?
-    for _, p := range peers {
-        // Get microservice address from peer's proxy
-        log.Println("Attempting to contact peer with pid:", p.ID)
-        stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAManagerFindProtID)
-        if err != nil {
-            continue
-        }
-        defer stream.Reset()
-
-        rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-        str, err := read(rw)
-        if err != nil {
-            if err == io.EOF {
-                log.Println("Error: Incoming stream unexpectedly closed")
-            }
-            log.Printf("Error reading from buffer: %v\n" +
-                "Buffer contents received: %s\n", err, str)
-            return peer.ID(""), "", p2putil.PerfInd{}, err
-        }
-
-        stream.Close()
-
-        log.Println("Got response from peer:", str)
-        return p.ID, str, p.Perf, nil
-    }
-
-    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
 }
 
+// TODO: Move this outside of LCAManager to a more general structure or library?
+//       It's not relevant to controlling the lifecycle of virtual resources.
 func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, error) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
@@ -216,16 +192,29 @@ func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, 
         return nil, errors.New("Error: could not connect to microservice peer")
     }
     defer stream.Reset()
-    r := bufio.NewReader(stream)
 
     err = req.Write(stream)
     if err != nil {
         return nil, errors.New(LCASErrWriteFail)
     }
 
+    // NOTE: Wrapping the 'stream' in a bufio.Reader and using that to construct
+    //       a Response leads to a stream leak, as Response.Body.Close() does not
+    //       close the stream. If we close the stream here in this function, it
+    //       prevents the Response.Body from being read later on. ¯\_(ツ)_/¯
+    //
+    //       Thus, we copy the response body to a temporary buffer and use that
+    //       to construct the response. This strategy currently does not support
+    //       streaming HTTP applications (e.g. video); all response content must
+    //       fit into a single Response.
+    bodyBuf, err := ioutil.ReadAll(stream)
+    if err != nil {
+        return nil, fmt.Errorf("Unable to read from stream\n%w\n", err)
+    }
+    r := bufio.NewReader(bytes.NewBuffer(bodyBuf))
     resp, err := http.ReadResponse(r, req)
     if err != nil {
-        if resp != nil {
+        if resp != nil && resp.Body != nil {
             resp.Body.Close()
         }
         return nil, errors.New("Error: could not receive response")
