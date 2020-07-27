@@ -29,6 +29,7 @@ import (
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
+    "github.com/Multi-Tier-Cloud/service-manager/rcache"
 )
 
 const defaultKeyFile = "~/.privKeyProxy"
@@ -57,6 +58,9 @@ var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
 var cache pcache.PeerCache
+
+// Global Registry Cache instance to cache service registry info
+var registryCache *rcache.RegistryCache
 
 // Listens to the listening socket and redirects to remote addr
 type Forwarder struct {
@@ -174,26 +178,21 @@ func createStream(targetPeer peer.ID, proto protocol.ID) (network.Stream, error)
 // resolveService() performs the service name to hash lookup, and then finds
 // an appropriate peer that provides that service, allocating a new instance
 // if necessary.
-func resolveService(servName string) (peer.ID, error) {
-    log.Println("Looking for service with name", servName, "in hash-lookup")
-    info, err := registry.GetServiceWithHostRouting(
-        manager.Host.Ctx, manager.Host.Host,
-        manager.Host.RoutingDiscovery, servName)
-
+// Returns the peer's ID, the service's info, and any errors
+func resolveService(servName string) (peer.ID, registry.ServiceInfo, error) {
+    info, err := registryCache.GetOrRequestService(servName)
     if err != nil {
-        //log.Printf("ERROR: Hash lookup for service %s failed\n%s\n", servName, err)
-        return "", fmt.Errorf("ERROR: Hash lookup for service %s failed\n%s\n",
-                                servName, err)
+        return "", info, fmt.Errorf("ERROR: Hash lookup for service %s failed\n%s\n",
+                                    servName, err)
     }
 
     peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash)
     if err != nil {
-        //log.Printf("ERROR: Unable to find or allocate service %s (%s)\n%v\n", servName, servHash, err)
-        return "", fmt.Errorf("ERROR: Unable to find or allocate service %s (%s)\n%v\n",
-                                servName, info.ContentHash, err)
+        return "", info, fmt.Errorf("ERROR: Unable to find or allocate service %s (%s)\n%v\n",
+                                    servName, info.ContentHash, err)
     }
 
-    return peerProxyID, nil
+    return peerProxyID, info, nil
 }
 
 // Handles the setting up proxies to services
@@ -301,6 +300,8 @@ func main() {
     // Argument options
     var configPath string
     flag.StringVar(&configPath, "configfile", "../conf/conf.json", "Path to configuration file to use")
+    var rcacheTTL int
+    flag.IntVar(&rcacheTTL, "rcache-ttl", 3600, "Time-to-live in seconds for registry cache entries")
 
     var keyFlags util.KeyFlags
     var bootstraps *[]multiaddr.Multiaddr
@@ -414,7 +415,7 @@ func main() {
         log.Fatalf("ERROR: Unable to create LCA Manager\n%s", err)
     }
 
-    // Setup cache
+    // Setup peer cache
     config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
     config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
     log.Println("Launching proxy PeerCache instance")
@@ -424,6 +425,10 @@ func main() {
     cache = pcache.NewPeerCache(config.Perf, &manager.Host)
     // Boot up cache managment function
     go cache.UpdateCache()
+
+    // Setup registry cache
+    registryCache = rcache.NewRegistryCache(manager.Host.Ctx, manager.Host.Host,
+        manager.Host.RoutingDiscovery, rcacheTTL)
 
     // Setup HTTP control service
     // This port number must be fixed in order for the proxy to be portable

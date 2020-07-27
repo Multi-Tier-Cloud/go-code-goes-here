@@ -428,7 +428,7 @@ func setupChain(chainSpec []string) (network.Stream, error) {
     log.Printf("Requested protocol is: %s\n", tpProto)
     log.Printf("Requested service is: %s\n", servName)
 
-    peerProxyID, err := resolveService(servName)
+    peerProxyID, _, err := resolveService(servName)
     if err != nil {
         err = fmt.Errorf("Unable to resolve service %s\n%w\n", servName, err)
         log.Printf("ERROR: %v", err)
@@ -531,7 +531,7 @@ func chainSetupHandler(stream network.Stream) {
     // Dial the next service and forward the chain setup message.
     log.Printf("The next service is: %s %s\n", tpProto, nextServ)
     log.Println("Looking for service with name", nextServ, "in hash-lookup")
-    peerProxyID, err := resolveService(nextServ)
+    peerProxyID, _, err := resolveService(nextServ) // TODO: Make use of service info (second param)
     if err != nil {
         log.Printf("ERROR: Unable to resolve service %s\n%v\n", nextServ, err)
         return
