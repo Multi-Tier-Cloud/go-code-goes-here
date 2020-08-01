@@ -23,6 +23,8 @@ import (
     "github.com/Multi-Tier-Cloud/common/p2putil"
     "github.com/Multi-Tier-Cloud/common/util"
 
+    "github.com/Multi-Tier-Cloud/service-registry/registry"
+
     "github.com/Multi-Tier-Cloud/service-manager/conf"
     "github.com/Multi-Tier-Cloud/service-manager/lca"
     "github.com/Multi-Tier-Cloud/service-manager/pcache"
@@ -39,19 +41,21 @@ func init() {
 var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
-var cache pcache.PeerCache
+var peerCache *pcache.PeerCache
 
 // Global Registry Cache instance to cache service registry info
 var registryCache *rcache.RegistryCache
 
-func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Response, error) {
+func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Request) (*http.Response, error) {
     var err error
     var id peer.ID
     var serviceAddress string
     var perf p2putil.PerfInd
+    serviceHash := servInfo.ContentHash
+    dockerHash := servInfo.DockerHash
 
     // 2. Search for cached instances, allocate new instance if none found
-    id, serviceAddress, err = cache.GetPeer(serviceHash)
+    id, serviceAddress, err = peerCache.GetPeer(serviceHash)
     log.Printf("Get peer returned ID %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
     if err != nil {
         // Search for an instance in the network, allocating a new one if need be.
@@ -95,19 +99,17 @@ func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Respon
                         break
                     }
                 }
-            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                log.Println("Found service does not meet requirements, creating new service instance")
-                id2, serviceAddress2, _, err := manager.AllocBetterService(dockerHash, perf)
+            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+                log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, servInfo.NetworkSoftReq)
+                id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     log.Println("No services able to be created, using previously found peer")
-                } else {
-                    id, serviceAddress = id2, serviceAddress2
                 }
             }
 
             if err == nil && serviceAddress != "" {
                 // Cache peer information
-                cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+                peerCache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
             }
         }
 
@@ -123,7 +125,7 @@ func runRequest(serviceHash, dockerHash string, req *http.Request) (*http.Respon
     resp, err := manager.Request(id, req)
     if err != nil {
         log.Printf("ERROR: HTTP request over P2P failed\n%v\n", err)
-        go cache.RemovePeer(id, serviceAddress)
+        go peerCache.RemovePeer(id, serviceAddress)
     }
 
     return resp, err
@@ -147,7 +149,7 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
     // Run request
-    resp, err := runRequest(info.ContentHash, info.DockerHash, r)
+    resp, err := runRequest(serviceName, info, r)
     if resp != nil {
         defer resp.Body.Close()
     }
@@ -336,20 +338,15 @@ func main() {
         log.Fatalf("ERROR: Unable to create LCA Manager\n%s", err)
     }
 
-    // Setup peer cache
-    config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
-    config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
-    log.Println("Launching proxy PeerCache instance")
-    log.Println("Setting performance requirements based on perf.conf",
-        "soft limit:", config.Perf.SoftReq.RTT, "hard limit:", config.Perf.HardReq.RTT)
-    // Create cache instance
-    cache = pcache.NewPeerCache(config.Perf, &manager.Host)
-    // Boot up cache managment function
-    go cache.UpdateCache()
 
     // Setup registry cache
     registryCache = rcache.NewRegistryCache(manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, rcacheTTL)
+
+    // Create peer cache instance and start cache update loop
+    log.Println("Launching proxy PeerCache instance")
+    peerCache = pcache.NewPeerCache(&manager.Host, registryCache)
+    go peerCache.UpdateCache()
 
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
