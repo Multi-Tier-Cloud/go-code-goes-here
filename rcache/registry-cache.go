@@ -87,7 +87,9 @@ func (rc *RegistryCache) Delete(serviceName string) {
 // Try to get service info from cache
 // If not in cache or expired, request it from registry-service and add it to cache
 func (rc *RegistryCache) GetOrRequestService(serviceName string) (info registry.ServiceInfo, err error) {
-    log.Println("Looking for service with name", serviceName, "in registry cache")
+    // TODO: Log print below commented for now due to updateCache() loop in pcache, spams screen
+    //       Can uncomment when a proper logging library with different levels is implemented
+    //log.Println("Looking for service with name", serviceName, "in registry cache")
     info, ok := rc.Get(serviceName)
     if !ok {
         log.Println("Not cached or expired, try querying registry-service")

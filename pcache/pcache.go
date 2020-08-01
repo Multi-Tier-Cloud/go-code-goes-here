@@ -13,16 +13,14 @@ import (
 
     "github.com/Multi-Tier-Cloud/common/p2pnode"
     "github.com/Multi-Tier-Cloud/common/p2putil"
+    "github.com/Multi-Tier-Cloud/service-manager/rcache"
 )
 
 func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
-type PerfConf struct {
-    SoftReq p2putil.PerfInd
-    HardReq p2putil.PerfInd
-}
+var rcacheDefaultTTL = 600 // Seconds
 
 // New type with PeerInfo and RCount
 // R stands for Reliability and counts how many times
@@ -37,20 +35,25 @@ type RPeerInfo struct {
 // PeerCache holds the performance requirements
 // and peer levels based on reliability
 type PeerCache struct {
-    ReqPerf PerfConf
     NLevels uint
     Levels  [][]RPeerInfo
+
     // Private variables
     node    *p2pnode.Node
     mux     sync.Mutex
     rmax    uint
+
+    // Pointer to a registry cache
+    // Has its own internal mutex, so don't need to lock the struct-local mutex
+    rcache  *rcache.RegistryCache
 }
 
 // Request struct to request addition of peer in UpdateCache
 type PeerRequest struct {
-    ID      peer.ID
-    Hash    string
-    Address string
+    ID          peer.ID
+    ServName    string
+    Hash        string
+    Address     string
 }
 
 func RPeerInfoCompare(l, r RPeerInfo) bool {
@@ -58,10 +61,14 @@ func RPeerInfoCompare(l, r RPeerInfo) bool {
 }
 
 // Constructor for PeerCache
-// Takes performance requirements (reqPerf) as argument
-func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
-    var peerCache PeerCache
-    peerCache.ReqPerf = reqPerf
+func NewPeerCache(node *p2pnode.Node, regCache *rcache.RegistryCache) *PeerCache {
+    if regCache == nil {
+        regCache = rcache.NewRegistryCache(node.Ctx, node.Host,
+                                node.RoutingDiscovery, rcacheDefaultTTL)
+    }
+
+    peerCache := PeerCache{rcache: regCache}
+
     // This is hardcoded for now as there really isn't
     // need for any more levels than three
     // Level 0: performant and reliable
@@ -76,7 +83,7 @@ func NewPeerCache(reqPerf PerfConf, node *p2pnode.Node) PeerCache {
     peerCache.node = node
     // Look for top 3 cache results when deleting
     peerCache.rmax = 3
-    return peerCache
+    return &peerCache
 }
 
 // Helper function "add peer to slice"
@@ -101,7 +108,7 @@ func (cache *PeerCache) AddPeer(p PeerRequest) {
             // Set RCount to 50 so it doesn't immediately get kicked
             // to the last level upon cache update
             RCount: 50, Info: p2putil.PeerInfo{
-                Perf: p2putil.PerfInd{}, ID: p.ID,
+                Perf: p2putil.PerfInd{}, ID: p.ID, ServName: p.ServName,
             }, Hash: p.Hash, Address: p.Address,
         },
     )
@@ -161,32 +168,43 @@ func (cache *PeerCache) updateCache() {
     for l := uint(0); l < nLevels; l++ {
         for i := 0; i < len(cache.Levels[l]); i++ {
             // Ping peers to check performance
-            // TODO: set timeout based on performance requirement
-            responseChan := ping.Ping(ctx, cache.node.Host, cache.Levels[l][i].Info.ID)
+            peerRlb := &cache.Levels[l][i]
+            servInfo, err := cache.rcache.GetOrRequestService(peerRlb.Info.ServName)
+            if err != nil {
+                log.Printf("ERROR: Unable to get service information for %s\n%v\n",
+                            peerRlb.Info.ServName, err)
+            }
+
+            // Set pnig timeout based on service's hard performance requirement
+            pingCtx, pingCanc := context.WithTimeout(ctx, servInfo.NetworkHardReq.RTT)
+            defer pingCanc()
+            responseChan := ping.Ping(pingCtx, cache.node.Host, peerRlb.Info.ID)
             result := <-responseChan
+
             // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
-            if result.RTT == 0 || p2putil.PerfIndCompare(cache.ReqPerf.HardReq, perf) {
+            if result.RTT == 0 || p2putil.PerfIndCompare(servInfo.NetworkHardReq, perf) {
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
                 // Decrement i to account for rpfs
                 i--
             // If peer is up and doesn't meet requirements decrement RCount by 10
-            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                cache.Levels[l][i].Info.Perf = perf
-                if cache.Levels[l][i].RCount < 10 {
-                    cache.Levels[l][i].RCount = 0
+            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+                peerRlb.Info.Perf = perf
+                if peerRlb.RCount < 10 {
+                    peerRlb.RCount = 0
                 } else {
-                    cache.Levels[l][i].RCount -= 10
+                    peerRlb.RCount -= 10
                 }
             // If it does meet requirements then increment RCount
             } else {
-                cache.Levels[l][i].Info.Perf = perf
-                if cache.Levels[l][i].RCount < 100 {
-                    cache.Levels[l][i].RCount++
+                peerRlb.Info.Perf = perf
+                if peerRlb.RCount < 100 {
+                    peerRlb.RCount++
                 }
             }
         }
     }
+
     // Second pass: move updated peers into appropriate new levels
     // Move peers in top level down if they become unreliable
     for i := 0; i < len(cache.Levels[0]); i++ {
@@ -199,6 +217,7 @@ func (cache *PeerCache) updateCache() {
             i--
         }
     }
+
     // Move peers in middle level(s) to appropriate new levels
     for l := uint(1); l < (cache.NLevels-1); l++ {
         for i := 0; i < len(cache.Levels[l]); i++ {
@@ -221,6 +240,7 @@ func (cache *PeerCache) updateCache() {
             }
         }
     }
+
     // Remove all peers in last level (unreliable peers)
     cache.Levels[nLevels-1] = cache.Levels[nLevels-1][0:0]
     // Third pass: sort elements based on performance

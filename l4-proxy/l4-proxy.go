@@ -57,7 +57,7 @@ var servEndpoint string
 var manager lca.LCAManager
 
 // Global Peer Cache instance to cache connected peers
-var cache pcache.PeerCache
+var peerCache *pcache.PeerCache
 
 // Global Registry Cache instance to cache service registry info
 var registryCache *rcache.RegistryCache
@@ -73,14 +73,16 @@ type Forwarder struct {
 // Maps a remote addr to existing Forwarder for that addr
 var serv2Fwd = make(map[string]Forwarder)
 
-func findOrAllocate(serviceHash, dockerHash string) (peer.ID, error) {
+func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, error) {
     var err error
     var id peer.ID
     var serviceAddress string
     var perf p2putil.PerfInd
+    serviceHash := servInfo.ContentHash
+    dockerHash := servInfo.DockerHash
 
     // 2. Search for cached instances
-    id, serviceAddress, err = cache.GetPeer(serviceHash)
+    id, serviceAddress, err = peerCache.GetPeer(serviceHash)
     log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
     if err != nil {
         // Search for an instance in the network, allocating a new one if need be.
@@ -124,8 +126,8 @@ func findOrAllocate(serviceHash, dockerHash string) (peer.ID, error) {
                         break
                     }
                 }
-            } else if p2putil.PerfIndCompare(cache.ReqPerf.SoftReq, perf) {
-                log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, cache.ReqPerf.SoftReq)
+            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+                log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, servInfo.NetworkSoftReq)
                 log.Println("Creating new service instance")
                 id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
@@ -136,7 +138,8 @@ func findOrAllocate(serviceHash, dockerHash string) (peer.ID, error) {
 
         if err == nil && serviceAddress != "" {
             // Cache peer information and loop again
-            cache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+            peerCache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash,
+                                Address: serviceAddress, ServName: servName,})
 
             elapsedTime := time.Now().Sub(startTime)
             log.Println("Find/alloc service took:", elapsedTime)
@@ -186,7 +189,7 @@ func resolveService(servName string) (peer.ID, registry.ServiceInfo, error) {
                                     servName, err)
     }
 
-    peerProxyID, err := findOrAllocate(info.ContentHash, info.DockerHash)
+    peerProxyID, err := findOrAllocate(servName, info)
     if err != nil {
         return "", info, fmt.Errorf("ERROR: Unable to find or allocate service %s (%s)\n%v\n",
                                     servName, info.ContentHash, err)
@@ -415,20 +418,14 @@ func main() {
         log.Fatalf("ERROR: Unable to create LCA Manager\n%s", err)
     }
 
-    // Setup peer cache
-    config.Perf.SoftReq.RTT = config.Perf.SoftReq.RTT * time.Millisecond
-    config.Perf.HardReq.RTT = config.Perf.HardReq.RTT * time.Millisecond
-    log.Println("Launching proxy PeerCache instance")
-    log.Println("Setting performance requirements based on perf.conf",
-        "soft limit:", config.Perf.SoftReq.RTT, "hard limit:", config.Perf.HardReq.RTT)
-    // Create cache instance
-    cache = pcache.NewPeerCache(config.Perf, &manager.Host)
-    // Boot up cache managment function
-    go cache.UpdateCache()
-
     // Setup registry cache
     registryCache = rcache.NewRegistryCache(manager.Host.Ctx, manager.Host.Host,
         manager.Host.RoutingDiscovery, rcacheTTL)
+
+    // Create peer cache instance and start cache update loop
+    log.Println("Launching proxy PeerCache instance")
+    peerCache = pcache.NewPeerCache(&manager.Host, registryCache)
+    go peerCache.UpdateCache()
 
     // Setup HTTP control service
     // This port number must be fixed in order for the proxy to be portable
