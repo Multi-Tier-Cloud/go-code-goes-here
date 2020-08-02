@@ -1,6 +1,7 @@
 # ignore binaries
 allocator/allocator
 proxy/proxy
+l4-proxy/l4-proxy
 
 # ignore vim swapfiles
 **/*.swp
