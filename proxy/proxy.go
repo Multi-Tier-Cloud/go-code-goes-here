@@ -55,7 +55,7 @@ func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Reques
     dockerHash := servInfo.DockerHash
 
     // 2. Search for cached instances, allocate new instance if none found
-    id, serviceAddress, err = peerCache.GetPeer(serviceHash)
+    id, err = peerCache.GetPeer(serviceHash)
     log.Printf("Get peer returned ID %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
     if err != nil {
         // Search for an instance in the network, allocating a new one if need be.
@@ -109,7 +109,11 @@ func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Reques
 
             if err == nil && serviceAddress != "" {
                 // Cache peer information
-                peerCache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash, Address: serviceAddress})
+                peerCache.AddPeer(p2putil.PeerInfo{
+                    ID: id,
+                    ServName: servName,
+                    ServHash: serviceHash,
+                })
             }
         }
 
@@ -125,7 +129,7 @@ func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Reques
     resp, err := manager.Request(id, req)
     if err != nil {
         log.Printf("ERROR: HTTP request over P2P failed\n%v\n", err)
-        go peerCache.RemovePeer(id, serviceAddress)
+        go peerCache.RemovePeer(id)
     }
 
     return resp, err

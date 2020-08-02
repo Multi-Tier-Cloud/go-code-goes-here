@@ -82,7 +82,7 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
     dockerHash := servInfo.DockerHash
 
     // 2. Search for cached instances
-    id, serviceAddress, err = peerCache.GetPeer(serviceHash)
+    id, err = peerCache.GetPeer(serviceHash)
     log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
     if err != nil {
         // Search for an instance in the network, allocating a new one if need be.
@@ -127,7 +127,8 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
                     }
                 }
             } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
-                log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, servInfo.NetworkSoftReq)
+                log.Printf("Found service's RTT (%s) is greater than requirement (%s)\n",
+                                perf.RTT, servInfo.NetworkSoftReq.RTT)
                 log.Println("Creating new service instance")
                 id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
@@ -138,8 +139,11 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
 
         if err == nil && serviceAddress != "" {
             // Cache peer information and loop again
-            peerCache.AddPeer(pcache.PeerRequest{ID: id, Hash: serviceHash,
-                                Address: serviceAddress, ServName: servName,})
+            peerCache.AddPeer(p2putil.PeerInfo{
+                ID: id,
+                ServName: servName,
+                ServHash: serviceHash,
+            })
 
             elapsedTime := time.Now().Sub(startTime)
             log.Println("Find/alloc service took:", elapsedTime)
