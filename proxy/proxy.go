@@ -99,7 +99,7 @@ func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Reques
                         break
                     }
                 }
-            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+            } else if servInfo.NetworkSoftReq.LessThan(perf) {
                 log.Printf("Found service's performance (%s) does not meet requirements (%s)\n", perf, servInfo.NetworkSoftReq)
                 id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {

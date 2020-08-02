@@ -46,8 +46,8 @@ type PeerCache struct {
     rcache  *rcache.RegistryCache
 }
 
-func RPeerInfoCompare(l, r RPeerInfo) bool {
-    return p2putil.PerfIndCompare(l.Info.Perf, r.Info.Perf)
+func (l *RPeerInfo) LessThan(r RPeerInfo) bool {
+    return l.Info.Perf.LessThan(r.Info.Perf)
 }
 
 // Constructor for PeerCache
@@ -172,12 +172,12 @@ func (cache *PeerCache) updateCache() {
 
             // If peer isn't up or doesn't meet hard requirements remove from cache
             perf := p2putil.PerfInd{RTT: result.RTT}
-            if result.RTT == 0 || p2putil.PerfIndCompare(servInfo.NetworkHardReq, perf) {
+            if result.RTT == 0 || servInfo.NetworkHardReq.LessThan(perf) {
                 cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
                 // Decrement i to account for rpfs
                 i--
             // If peer is up and doesn't meet requirements decrement RCount by 10
-            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+            } else if servInfo.NetworkSoftReq.LessThan(perf) {
                 peerRlb.Info.Perf = perf
                 if peerRlb.RCount < 10 {
                     peerRlb.RCount = 0
@@ -235,7 +235,7 @@ func (cache *PeerCache) updateCache() {
     // Third pass: sort elements based on performance
     for l := uint(0); l < nLevels; l++ {
         sort.Slice(cache.Levels[l], func(i, j int) bool {
-            return RPeerInfoCompare(cache.Levels[l][i], cache.Levels[l][j])
+            return cache.Levels[l][i].LessThan(cache.Levels[l][j])
         })
     }
 }
