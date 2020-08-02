@@ -93,7 +93,7 @@ func (lca *LCAManager) AllocBetterService(
 
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {
-        if p2putil.PerfIndCompare(perf, p.Perf) {
+        if perf.LessThan(p.Perf) {
             return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find better service")
         }
         log.Println("Attempting to contact peer with pid:", p.ID)

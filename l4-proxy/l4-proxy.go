@@ -126,7 +126,7 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
                         break
                     }
                 }
-            } else if p2putil.PerfIndCompare(servInfo.NetworkSoftReq, perf) {
+            } else if servInfo.NetworkSoftReq.LessThan(perf) {
                 log.Printf("Found service's RTT (%s) is greater than requirement (%s)\n",
                                 perf.RTT, servInfo.NetworkSoftReq.RTT)
                 log.Println("Creating new service instance")
