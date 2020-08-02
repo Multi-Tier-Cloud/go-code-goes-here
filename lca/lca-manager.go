@@ -37,7 +37,9 @@ func pingService() error {
 }
 
 // Helper function to AllocService that handles the communication with LCA Allocator
-// Returns the new service's IP:port pair
+// Returns the new service's in-container IP:port pair, and any errors
+//   - NOTE: The service's IP:port pair is not really needed, but we'll keep it
+//           for potential debugging purposes.
 func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
     rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
     // Send command Start Program"
@@ -76,7 +78,7 @@ func requestAlloc(stream network.Stream, serviceHash string) (string, error) {
 func (lca *LCAManager) AllocBetterService(
     serviceHash string, perf p2putil.PerfInd,
 ) (
-    peer.ID, string, p2putil.PerfInd, error,
+    peer.ID, p2putil.PerfInd, error,
 ) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
@@ -85,7 +87,7 @@ func (lca *LCAManager) AllocBetterService(
     // Look for Allocators
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, LCAAllocatorRendezvous)
     if err != nil {
-        return peer.ID(""), "", p2putil.PerfInd{}, err
+        return peer.ID(""), p2putil.PerfInd{}, err
     }
 
     // Sort Allocators based on performance
@@ -94,33 +96,35 @@ func (lca *LCAManager) AllocBetterService(
     // Request allocation until one succeeds then return allocated service address
     for _, p := range peers {
         if perf.LessThan(p.Perf) {
-            return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find better service")
+            return peer.ID(""), p2putil.PerfInd{}, errors.New("Could not find better service")
         }
         log.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
+            log.Printf("ERROR: Unable to contact allocator %s\n%v\n", p.ID, err)
             continue
-        } else {
-            defer stream.Reset()
-            result, err := requestAlloc(stream, serviceHash)
-            if err != nil {
-                continue
-            }
-
-            return p.ID, result, p.Perf, nil
         }
+        defer stream.Reset()
+
+        _, err = requestAlloc(stream, serviceHash)
+        if err != nil {
+            log.Printf("ERROR: Unable to allocate service %s using allocator %s\n%v\n",
+                        serviceHash, p.ID, err)
+            continue
+        }
+
+        return p.ID, p.Perf, nil
     }
 
-    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
+    return peer.ID(""), p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
 }
 
 // Requests allocation on LCA Allocators with good network performance
 // Returns:
 //  - The peer ID of the allocator that spawned the new instance
-//  - The service address,
 //  - The performance of the allocator that spawned the instance
 //  - Any errors.
-func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
+func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, p2putil.PerfInd, error) {
     // Setup context
     ctx, cancel := context.WithCancel(lca.Host.Ctx)
     defer cancel()
@@ -128,7 +132,7 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
     // Look for Allocators
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, LCAAllocatorRendezvous)
     if err != nil {
-        return peer.ID(""), "", p2putil.PerfInd{}, err
+        return peer.ID(""), p2putil.PerfInd{}, err
     }
 
     // Sort Allocators based on performance
@@ -139,25 +143,32 @@ func (lca *LCAManager) AllocService(serviceHash string) (peer.ID, string, p2puti
         log.Println("Attempting to contact peer with pid:", p.ID)
         stream, err := lca.Host.Host.NewStream(ctx, p.ID, LCAAllocatorProtocolID)
         if err != nil {
+            log.Printf("ERROR: Unable to contact allocator %s\n%v\n", p.ID, err)
             continue
-        } else {
-            defer stream.Reset()
-            result, err := requestAlloc(stream, serviceHash)
-            if err != nil {
-                continue
-            }
-
-            return p.ID, result, p.Perf, nil
         }
+        defer stream.Reset()
+
+        _, err = requestAlloc(stream, serviceHash)
+        if err != nil {
+            log.Printf("ERROR: Unable to allocate service %s using allocator %s\n%v\n",
+                        serviceHash, p.ID, err)
+            continue
+        }
+
+        return p.ID, p.Perf, nil
     }
 
-    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
+    return peer.ID(""), p2putil.PerfInd{}, errors.New("Could not find peer to allocate service")
 }
 
 // TODO: Move this outside of LCAManager to a more general structure or library?
 //       It's not relevant to controlling the lifecycle of virtual resources.
 // Finds the best service instance by pinging other LCA Manager instances
-func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil.PerfInd, error) {
+// Returns:
+//  - ID of candidate peer
+//  - Latency to candidate peer
+//  - Any errors
+func (lca *LCAManager) FindService(serviceHash string) (peer.ID, p2putil.PerfInd, error) {
     log.Println("Finding providers for:", serviceHash)
 
     // Setup context
@@ -167,16 +178,15 @@ func (lca *LCAManager) FindService(serviceHash string) (peer.ID, string, p2putil
     // Find peers
     peerChan, err := lca.Host.RoutingDiscovery.FindPeers(ctx, serviceHash)
     if err != nil {
-        return peer.ID(""), "", p2putil.PerfInd{}, err
+        return peer.ID(""), p2putil.PerfInd{}, err
     }
 
     peers := p2putil.SortPeers(peerChan, lca.Host)
     if len(peers) > 0 {
-        // TODO: Remove second output param, now obsolete after proxy-to-proxy queries
-        return peers[0].ID, "dummyServAddr", peers[0].Perf, nil
+        return peers[0].ID, peers[0].Perf, nil
     }
 
-    return peer.ID(""), "", p2putil.PerfInd{}, errors.New("Could not find peer offering service")
+    return peer.ID(""), p2putil.PerfInd{}, errors.New("Could not find peer offering service")
 }
 
 // TODO: Move this outside of LCAManager to a more general structure or library?
@@ -221,43 +231,6 @@ func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, 
     }
 
     return resp, nil
-}
-
-// DEPRECATED
-// TODO: Now that proxy-to-proxy is enabled, remove the following function?
-// LCAManagerHandler generator function
-// Used to allow the Handler to remember the service address
-// Generated LCAManagerHandler pings the service it is responsible for to check
-// that it is still up then sends the service address back to the requester.
-func FindServiceHandler(address string) func(network.Stream) {
-    return func(stream network.Stream) {
-        defer stream.Close()
-        defer func() {
-            // Don't crash the whole program if panic() called
-            // Print stack trace for debug info
-            if r := recover(); r != nil {
-                fmt.Printf("Stream handler for %s panic'd:\n%s\n",
-                    address, string(debug.Stack()))
-            }
-        }()
-
-        log.Println("Got a new LCA Manager Find request")
-        rw := bufio.NewReadWriter(bufio.NewReader(stream), bufio.NewWriter(stream))
-        err := pingService()
-        if err != nil {
-            err = write(rw, "Error")
-            if err != nil {
-                log.Println("Error writing to buffer")
-                panic(err)
-            }
-        } else {
-            err = write(rw, address)
-            if err != nil {
-                log.Println("Error writing to buffer")
-                panic(err)
-            }
-        }
-    }
 }
 
 // TODO: Finish this function

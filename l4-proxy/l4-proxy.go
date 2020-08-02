@@ -76,23 +76,22 @@ var serv2Fwd = make(map[string]Forwarder)
 func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, error) {
     var err error
     var id peer.ID
-    var serviceAddress string
     var perf p2putil.PerfInd
     serviceHash := servInfo.ContentHash
     dockerHash := servInfo.DockerHash
 
     // 2. Search for cached instances
     id, err = peerCache.GetPeer(serviceHash)
-    log.Printf("Get peer returned id %s, serviceAddr %s, and err %v\n", id, serviceAddress, err)
-    if err != nil {
+    if err == nil {
+        log.Printf("Found cached peer with ID %s for service %s\n", id, servName)
+    } else {
         // Search for an instance in the network, allocating a new one if need be.
         // Maximum of 3 allocation attempts.
         // TODO: It's totally possible for an allocation attempt to succeed,
         // but the service takes a long time to come up, leading to subsequent
         // allocation attempts. This is a future problem to solve.
-        serviceAddress = ""
         startTime := time.Now()
-        for attempts := 0; attempts < 3 && serviceAddress == ""; attempts++ {
+        for attempts := 0; attempts < 3 && id == peer.ID(""); attempts++ {
             if attempts > 0 {
                 log.Printf("Unable to successfully find or allocate, retrying...")
             }
@@ -101,12 +100,13 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
             //       Need to combine AllocService and AllocBetterService
             //       Need to obtain perf req from hash-lookup service
             log.Println("Finding best existing service instance")
-            id, serviceAddress, perf, err = manager.FindService(serviceHash)
+            id, perf, err = manager.FindService(serviceHash)
             if err != nil {
                 log.Println("Could not find, creating new service instance")
-                _, _, _, err = manager.AllocService(dockerHash)
+                _, _, err = manager.AllocService(dockerHash)
                 if err != nil {
                     log.Println("Service allocation failed\n", err)
+                    continue // Or return error right away?
                 }
 
                 // Re-do FindService() to ensure the new instance is connected
@@ -121,8 +121,8 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
                     log.Printf("ERROR: Unable to create ExpoBackoffAttempts\n")
                 }
                 for backoff.Attempt() {
-                    id, serviceAddress, perf, err = manager.FindService(serviceHash)
-                    if err == nil && serviceAddress != "" {
+                    id, perf, err = manager.FindService(serviceHash)
+                    if err == nil {
                         break
                     }
                 }
@@ -130,14 +130,14 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
                 log.Printf("Found service's RTT (%s) is greater than requirement (%s)\n",
                                 perf.RTT, servInfo.NetworkSoftReq.RTT)
                 log.Println("Creating new service instance")
-                id, serviceAddress, _, err = manager.AllocBetterService(dockerHash, perf)
+                _, _, err = manager.AllocBetterService(dockerHash, perf)
                 if err != nil {
                     log.Println("No services able to be created, using previously found peer")
                 }
             }
         }
 
-        if err == nil && serviceAddress != "" {
+        if err == nil && id != peer.ID("") {
             // Cache peer information and loop again
             peerCache.AddPeer(p2putil.PeerInfo{
                 ID: id,
@@ -150,7 +150,7 @@ func findOrAllocate(servName string, servInfo registry.ServiceInfo) (peer.ID, er
         }
     }
 
-    if serviceAddress == "" || id == peer.ID("") {
+    if id == peer.ID("") {
         return peer.ID(""), fmt.Errorf("Unable to find or allocate service\n")
     }
 
