@@ -28,8 +28,6 @@ var rcacheDefaultTTL = 600 // Seconds
 type RPeerInfo struct {
     RCount  uint
     Info    p2putil.PeerInfo
-    Hash    string
-    Address string
 }
 
 // PeerCache holds the performance requirements
@@ -46,14 +44,6 @@ type PeerCache struct {
     // Pointer to a registry cache
     // Has its own internal mutex, so don't need to lock the struct-local mutex
     rcache  *rcache.RegistryCache
-}
-
-// Request struct to request addition of peer in UpdateCache
-type PeerRequest struct {
-    ID          peer.ID
-    ServName    string
-    Hash        string
-    Address     string
 }
 
 func RPeerInfoCompare(l, r RPeerInfo) bool {
@@ -98,8 +88,8 @@ func rpfs(s []RPeerInfo, i uint) []RPeerInfo {
     return s[:len(s)-1]
 }
 
-func (cache *PeerCache) AddPeer(p PeerRequest) {
-    log.Println("Adding new peer with ID and service", p.ID, p.Hash)
+func (cache *PeerCache) AddPeer(pInfo p2putil.PeerInfo) {
+    log.Println("Adding new peer with ID and service", pInfo.ID, pInfo.ServHash)
     // Add peer to cache in second lowest level
     cache.mux.Lock()
     defer cache.mux.Unlock()
@@ -107,14 +97,13 @@ func (cache *PeerCache) AddPeer(p PeerRequest) {
         RPeerInfo{
             // Set RCount to 50 so it doesn't immediately get kicked
             // to the last level upon cache update
-            RCount: 50, Info: p2putil.PeerInfo{
-                Perf: p2putil.PerfInd{}, ID: p.ID, ServName: p.ServName,
-            }, Hash: p.Hash, Address: p.Address,
+            RCount: 50,
+            Info: pInfo,
         },
     )
 }
 
-func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
+func (cache *PeerCache) RemovePeer(id peer.ID) {
     cache.mux.Lock()
     defer cache.mux.Unlock()
     for l := uint(0); l < (cache.NLevels-1); l++ {
@@ -123,7 +112,7 @@ func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
             // In each cache level look at the first rmax peers
             if count < cache.rmax {
                 // Check if the current peer is the one to delete
-                if id == p.Info.ID && address == p.Address {
+                if id == p.Info.ID {
                     cache.Levels[l] = rpfs(cache.Levels[l], uint(i))
                     // No need to decrement i after rpfs since we're going to return
                     return
@@ -138,7 +127,7 @@ func (cache *PeerCache) RemovePeer(id peer.ID, address string) {
 }
 
 // Gets a reliable peer from cache
-func (cache *PeerCache) GetPeer(hash string) (peer.ID, string, error) {
+func (cache *PeerCache) GetPeer(hash string) (peer.ID, error) {
     // Search levels starting from level 0 (most reliable)
     // omitting the last level (non-performant peers due for removal)
     cache.mux.Lock()
@@ -146,13 +135,13 @@ func (cache *PeerCache) GetPeer(hash string) (peer.ID, string, error) {
     for l := uint(0); l < (cache.NLevels-1); l++ {
         for _, p := range cache.Levels[l] {
             // Return the first performant peer
-            if p.Hash == hash {
+            if p.Info.ServHash == hash {
                 log.Println("Getting peer with ID", p.Info.ID, "from pcache")
-                return p.Info.ID, p.Address, nil
+                return p.Info.ID, nil
             }
         }
     }
-    return peer.ID(""), "", errors.New("No suitable peer found in cache")
+    return peer.ID(""), errors.New("No suitable peer found in cache")
 }
 
 
