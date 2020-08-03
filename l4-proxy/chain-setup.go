@@ -8,6 +8,7 @@ package main
 import (
     "bufio"
     "bytes"
+    "context"
     "encoding/gob"
     "errors"
     "fmt"
@@ -15,11 +16,16 @@ import (
     "log"
     "strings"
     "syscall"
+    "time"
+
+    "github.com/Multi-Tier-Cloud/common/p2putil"
+    "github.com/Multi-Tier-Cloud/service-registry/registry"
 
     "github.com/libp2p/go-msgio"
+    "github.com/libp2p/go-libp2p/p2p/protocol/ping"
     "github.com/libp2p/go-libp2p-core/network"
+    "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/protocol"
-
 )
 
 var chainSetupProtoID = protocol.ID("/ChainSetup/1.0")
@@ -405,6 +411,38 @@ func fwdStream2Stream(src, dst network.Stream) {
     }
 }
 
+// TODO: Peer cache already does pings. Perhaps eventually migrate to using
+//       pcache to trigger disconnect events? E.g. Can use a callback function
+//       when a peer is evicted from the cache, or using an event bus.
+//       See: https://github.com/libp2p/go-eventbus
+func connQualMonitor(pid peer.ID, servInfo registry.ServiceInfo, stream network.Stream) {
+    p2pNode := manager.Host
+
+    for {
+        ticker := time.NewTicker(1 * time.Second) // Repeat each second
+
+        // Set timeout based on hard requirement
+        ctx, cancel := context.WithTimeout(p2pNode.Ctx, servInfo.NetworkHardReq.RTT * time.Nanosecond)
+        responseChan := ping.Ping(ctx, p2pNode.Host, pid)
+        result := <-responseChan
+
+        // If peer isn't up or doesn't meet hard requirements, remove it from
+        // the peer cache and terminate the connection underlying the stream
+        perf := p2putil.PerfInd{RTT: result.RTT}
+        if result.RTT == 0 || servInfo.NetworkHardReq.LessThan(perf) {
+            log.Printf("Ping result = %v; killing connection to peer %s\n", result.RTT, pid)
+            peerCache.RemovePeer(pid)
+            stream.Conn().Close()
+            ticker.Stop()
+            cancel()
+            return
+        }
+
+        <-ticker.C // Wait until second is up
+        cancel()
+    }
+}
+
 // Function for source (client) proxy to begin chain setup operation
 func setupChain(chainSpec []string) (network.Stream, error) {
     if len(chainSpec) < 2 {
@@ -428,7 +466,8 @@ func setupChain(chainSpec []string) (network.Stream, error) {
     log.Printf("Requested protocol is: %s\n", tpProto)
     log.Printf("Requested service is: %s\n", servName)
 
-    peerProxyID, _, err := resolveService(servName)
+    // resolveService() only returns a peer that meets its service quality
+    peerProxyID, servInfo, err := resolveService(servName)
     if err != nil {
         err = fmt.Errorf("Unable to resolve service %s\n%w\n", servName, err)
         log.Printf("ERROR: %v", err)
@@ -442,6 +481,9 @@ func setupChain(chainSpec []string) (network.Stream, error) {
         log.Printf("ERROR: %v", err)
         return nil, err
     }
+
+    // Run background goroutine to monitor outgoing connection quality
+    go connQualMonitor(peerProxyID, servInfo, stream)
 
     sendRecv := NewChainMsgCommunicator(stream)
     setupReq := NewChainSetupRequest(chainSpec)
@@ -531,7 +573,7 @@ func chainSetupHandler(stream network.Stream) {
     // Dial the next service and forward the chain setup message.
     log.Printf("The next service is: %s %s\n", tpProto, nextServ)
     log.Println("Looking for service with name", nextServ, "in hash-lookup")
-    peerProxyID, _, err := resolveService(nextServ) // TODO: Make use of service info (second param)
+    peerProxyID, servInfo, err := resolveService(nextServ)
     if err != nil {
         log.Printf("ERROR: Unable to resolve service %s\n%v\n", nextServ, err)
         return
@@ -544,10 +586,12 @@ func chainSetupHandler(stream network.Stream) {
         return
     }
 
-    outSendRecv := NewChainMsgCommunicator(outStream)
+    // Run background goroutine to monitor outgoing connection quality
+    go connQualMonitor(peerProxyID, servInfo, stream)
 
     // Forward chain setup request
     log.Printf("Middle of chain reached, forwarding SetupRequest...\n")
+    outSendRecv := NewChainMsgCommunicator(outStream)
     if err = sendSetupRequest(outSendRecv, chainSpec); err != nil {
         log.Printf("ERROR: sendSetupRequest() failed\n%v\n", err)
         return
