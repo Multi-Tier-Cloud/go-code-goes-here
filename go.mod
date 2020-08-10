@@ -17,6 +17,6 @@ require (
 	github.com/multiformats/go-multiaddr v0.2.2
 	github.com/prometheus/client_golang v1.6.0
 	github.com/t-lin/go-libp2p-gostream v0.2.2-0.20200623124215-b6cc09d9366b
-	google.golang.org/grpc v1.29.1 // indirect
+	google.golang.org/grpc v1.26.0 // indirect
 	gotest.tools v2.2.0+incompatible // indirect
 )
