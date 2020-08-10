@@ -12,7 +12,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
     "github.com/libp2p/go-libp2p-discovery"
 
-	"github.com/Multi-Tier-Cloud/service-registry/registry"
+	"github.com/PhysarumSM/service-registry/registry"
 )
 
 func init() {

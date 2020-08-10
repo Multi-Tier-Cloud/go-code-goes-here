@@ -13,10 +13,10 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/common/util"
-    "github.com/Multi-Tier-Cloud/service-manager/conf"
-    "github.com/Multi-Tier-Cloud/service-manager/lca"
+    "github.com/PhysarumSM/common/p2pnode"
+    "github.com/PhysarumSM/common/util"
+    "github.com/PhysarumSM/service-manager/conf"
+    "github.com/PhysarumSM/service-manager/lca"
 
     "github.com/prometheus/client_golang/prometheus/promhttp"
 )

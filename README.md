@@ -4,7 +4,7 @@
 This repository houses Go applications that takes care of allocating application instances, discovering application instances, and dispatching requests. The primary components of the service manager system is the LCA Allocator and the Proxy. The LCA Allocator runs on every physical server and is responsible for servicing allocation requests from the LCA Manager. The Proxy is the entrypoint for clients and servers to find application instances and make HTTP requests. A LCA Manager instance runs inside every Proxy instance to handle finding and requesting application instances.
 
 ## Getting Started
-This getting started guide assumes the required system components are already configured and running, namely [Hash Lookup](https://github.com/Multi-Tier-Cloud/hash-lookup) and [Monitoring](https://github.com/Multi-Tier-Cloud/monitoring). Refer to repository READMEs for more information. For a more general Getting Started guide, see the [main repository](https://github.com/Multi-Tier-Cloud/multi-tier-cloud).
+This getting started guide assumes the required system components are already configured and running, namely [Registry Service](https://github.com/PhysarumSM/service-registry) and [Monitoring](https://github.com/PhysarumSM/monitoring). Refer to repository READMEs for more information. For a more general Getting Started guide, see the [main repository](https://github.com/PhysarumSM/PhysarumSM).
 
 ### Building service-manager
 Build Requirements:

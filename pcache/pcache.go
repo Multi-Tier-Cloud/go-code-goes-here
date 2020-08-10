@@ -11,9 +11,9 @@ import (
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"
     "github.com/libp2p/go-libp2p-core/peer"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/common/p2putil"
-    "github.com/Multi-Tier-Cloud/service-manager/rcache"
+    "github.com/PhysarumSM/common/p2pnode"
+    "github.com/PhysarumSM/common/p2putil"
+    "github.com/PhysarumSM/service-manager/rcache"
 )
 
 func init() {

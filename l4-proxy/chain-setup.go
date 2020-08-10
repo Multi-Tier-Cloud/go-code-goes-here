@@ -18,8 +18,8 @@ import (
     "syscall"
     "time"
 
-    "github.com/Multi-Tier-Cloud/common/p2putil"
-    "github.com/Multi-Tier-Cloud/service-registry/registry"
+    "github.com/PhysarumSM/common/p2putil"
+    "github.com/PhysarumSM/service-registry/registry"
 
     "github.com/libp2p/go-msgio"
     "github.com/libp2p/go-libp2p/p2p/protocol/ping"

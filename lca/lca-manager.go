@@ -17,9 +17,9 @@ import (
     "github.com/libp2p/go-libp2p-core/network"
     "github.com/libp2p/go-libp2p-core/peer"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/common/p2putil"
-    "github.com/Multi-Tier-Cloud/service-registry/registry"
+    "github.com/PhysarumSM/common/p2pnode"
+    "github.com/PhysarumSM/common/p2putil"
+    "github.com/PhysarumSM/service-registry/registry"
 )
 
 //  for p2pnode.Node and also related

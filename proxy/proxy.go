@@ -19,16 +19,16 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
-    "github.com/Multi-Tier-Cloud/common/p2pnode"
-    "github.com/Multi-Tier-Cloud/common/p2putil"
-    "github.com/Multi-Tier-Cloud/common/util"
+    "github.com/PhysarumSM/common/p2pnode"
+    "github.com/PhysarumSM/common/p2putil"
+    "github.com/PhysarumSM/common/util"
 
-    "github.com/Multi-Tier-Cloud/service-registry/registry"
+    "github.com/PhysarumSM/service-registry/registry"
 
-    "github.com/Multi-Tier-Cloud/service-manager/conf"
-    "github.com/Multi-Tier-Cloud/service-manager/lca"
-    "github.com/Multi-Tier-Cloud/service-manager/pcache"
-    "github.com/Multi-Tier-Cloud/service-manager/rcache"
+    "github.com/PhysarumSM/service-manager/conf"
+    "github.com/PhysarumSM/service-manager/lca"
+    "github.com/PhysarumSM/service-manager/pcache"
+    "github.com/PhysarumSM/service-manager/rcache"
 )
 
 const defaultKeyFile = "~/.privKeyProxy"

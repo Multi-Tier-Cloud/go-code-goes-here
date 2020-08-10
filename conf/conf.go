@@ -1,7 +1,7 @@
 package conf
 
 import (
-    "github.com/Multi-Tier-Cloud/common/p2putil"
+    "github.com/PhysarumSM/common/p2putil"
 )
 
 type Config struct {
