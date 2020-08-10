@@ -37,6 +37,13 @@ github.com/Multi-Tier-Cloud/service-manager v0.2.1/go.mod h1:3HmYdie/JgICjWqZ2ju
 github.com/Multi-Tier-Cloud/service-registry v0.5.0 h1:72HTjB4dB6dz8/MvFjvLHfafZfDsFTBwtUIx8qXuVVA=
 github.com/Multi-Tier-Cloud/service-registry v0.5.0/go.mod h1:h8Hj0JclHyYxoJyOKfFhj0qGUvyDFTU2G1w37ZexRWY=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
+github.com/PhysarumSM/common v0.10.0 h1:KzT8opnAIRg4dTNjkjkkUosOoWb6z2k+Z3fE9f8mbbQ=
+github.com/PhysarumSM/common v0.10.0/go.mod h1:1zDVbt3Y/FoKK1b5C1/I+GrgauuP8r5DGhaEwyjbZnY=
+github.com/PhysarumSM/docker-driver v0.3.0 h1:2HtbmD9jlVD4vXS7/nwtTp1Fk6Bz8X/hxGrkGAc9EmY=
+github.com/PhysarumSM/docker-driver v0.3.0/go.mod h1:XnOotZ32njywMnSqoot2S8xXYuKex9vJf/Xpjv6piEA=
+github.com/PhysarumSM/service-manager v0.3.0/go.mod h1:4t667iO3UCXx7dq0nxXzdawhk/bPfn46G44koVUxgz4=
+github.com/PhysarumSM/service-registry v0.6.0 h1:0KW19aVHKsBviESQyuUrtsnHG2nfE0jqL9UcoJvMxYQ=
+github.com/PhysarumSM/service-registry v0.6.0/go.mod h1:LNFTKp8dFr8AFT88RVIz17aFvzuIL7nXuNtS/WMA02w=
 github.com/Stebalien/go-bitfield v0.0.0-20180330043415-076a62f9ce6e/go.mod h1:3oM7gXIttpYDAJXpVNnSCiUMYBLIZ6cb1t+Ip982MRo=
 github.com/Stebalien/go-bitfield v0.0.1 h1:X3kbSSPUaJK60wV2hjOPZwmpljr6VGCqdq4cBLhbQBo=
 github.com/Stebalien/go-bitfield v0.0.1/go.mod h1:GNjFpasyUVkHMsfEOk8EFLJ9syQ6SI+XWrX9Wf2XH0s=
