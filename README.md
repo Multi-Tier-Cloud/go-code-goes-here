@@ -13,80 +13,34 @@ Build Requirements:
 
 A bash script is included with the repository called `build.sh` that takes care of building the required Go source files. Go 1.13 must be installed as other Go versions are not supported. Run `build.sh` to build service-manager.
 
+### Adding your Application to Docker and service-registry
+Applications must be added to docker hub for use in Physarum. See [Registry Service](https://github.com/PhysarumSM/service-registry) for more information.
+
+### Modifying the Config to point to your Bootstrap
+The bootstraps in the PhysarumSM system are the monitoring nodes. Copy and paste the multiaddress of the monitoring nodes started as a prerequisite and add them to the `config/config.json` under `Bootstraps` to enable connection to the correct bootstrap node.
+
 ### Launching LCA Allocator
-LCA Allocator is located in the directory `allocator` and is responsible for allocating new server instances. This must be launched on every machine that you would like to be part of the pool to automatically allocate applications on.
+LCA Allocator is located in the directory `allocator` and is responsible for allocating new server instances. This must be launched on every machine that you would like to be part of the pool to automatically allocate applications on. Based on the config in `config/config.json` it will automatically connect to an appropriate bootstrap.
 ```
 $ cd allocator
 $ ./allocator &
-Spawning LCA Allocator
-Setting stream handlers
-Creating DHT
-Connecting to bootstrap nodes...
-Connected to bootstrap node: {12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X: [/ip4/10.11.17.32/tcp/4001]}
-Connected to bootstrap node: {QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk: [/ip4/10.11.17.15/tcp/4001]}
-Connected to 3 peers!
-Creating Routing Discovery
-Finished setting up libp2p Node with PID QmSd2hr7EXmQYVrmtA3PzqK3xhbuKGzTZcaAsMQzWJkkcJ and Multiaddresses [/ip4/127.0.0.1/tcp/42440 /ip4/10.11.17.10/tcp/42440 /ip6/::1/tcp/46571]
-Waiting for requests...
 ```
 
 ### Launching Proxy in Server Mode
-In order for an application instance to access the system, a Proxy instance is needed. Server mode is where the Proxy binds to an instance of an application registered in Hash Lookup and allows the instance to be found and find other instances to query via the LCA Manager. All HTTP requests must be routed through the IP address and port of Proxy instance with the requested application as the first section and the arguments in the second, ie. HTTP GET http://127.0.0.1/hello-world-server/hello.
+In order for an application instance to access other applications and be accessable to other applications through the system, a Proxy instance is needed. Server mode is used by an application that wants to be accessible by other applications. The Proxy binds to an instance of an application registered in `service-registry` and allows the instance to be found via the LCA Manager. All HTTP requests must be routed through the IP address and port of Proxy instance with the requested application as the first section and the arguments in the second, ie. HTTP GET http://127.0.0.1/hello-world-server/hello.
 ```
 $ cd proxy
 $ ./proxy 1234 hello-world-server 10.11.17.10
-Starting LCA Manager in service mode with arguments hello-world-server 10.11.17.10:8080
-Setting stream handlers
-Creating DHT
-Connecting to bootstrap nodes...
-Connected to bootstrap node: {12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X: [/ip4/10.11.17.32/tcp/4001]}
-Connected to bootstrap node: {QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk: [/ip4/10.11.17.15/tcp/4001]}
-Connected to 5 peers!
-Creating Routing Discovery
-Finished setting up libp2p Node with PID QmPwKBtQ4zgF3HsSU6itot5WLMSBZcuZLNVgb1PNRDY245 and Multiaddresses [/ip4/127.0.0.1/tcp/40588 /ip4/10.11.17.10/tcp/40588 /ip6/::1/tcp/45279]
-Connecting to: {QmWTs3McLrTjuAdNsEoh7J8uYa2ZDbWsBkg8UV2t2Jn1s1: [/ip4/10.11.17.13/tcp/46042 /ip6/::1/tcp/35435 /ip4/127.0.0.1/tcp/46042]}
-Setting stream handlers
-Creating DHT
-Connecting to bootstrap nodes...
-Connected to bootstrap node: {12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X: [/ip4/10.11.17.32/tcp/4001]}
-Connected to bootstrap node: {QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk: [/ip4/10.11.17.15/tcp/4001]}
-Connected to 2 peers!
-Creating Routing Discovery
-Finished setting up libp2p Node with PID Qmb6envkTd1fPWaj5ysTjGPjAvYMCjdFw3gMQYFf6zRGhS and Multiaddresses [/ip4/127.0.0.1/tcp/38168 /ip4/10.11.17.10/tcp/38168 /ip6/::1/tcp/44438]
-Launching proxy PeerCache instance
-Setting performance requirements based on perf.conf soft limit: 100ms hard limit: 1s
-Starting HTTP Proxy on 127.0.0.1:1234
-Launching cache update function
 ```
+Run `$ proxy -help` for more commandline options
 
 ### Launching in Client Mode (Anonymous Mode)
-In order for an appliation instance to access the system, a Proxy instance is needed. Client mode is where the Proxy serves an application that does not have HTTP API routes and accessess the system only to make requests. Such an application does not need to be registered with Hash Lookup. The Proxy instance allows the application instance to find other instances to query via the LCA Manager. All HTTP requests must be routed through the IP address and port of Proxy instance with the requested application as the first section and the arguments in the second, ie. HTTP GET http://127.0.0.1/hello-world-server/hello.
+In order for an application instance to access other applications and be accessable to other applications through the system, a Proxy instance is needed. Client mode is used by an application or user that does not need to be accessible to other applications. This also means that the connected application does not need to be registered with `service-registry`. The Client mode Proxy instance allows the application to find other application instances via the LCA Manager and queries them. All HTTP requests must be routed through the IP address and port of Proxy instance with the requested application as the first section and the arguments in the second, ie. HTTP GET http://127.0.0.1/hello-world-server/hello.
 ```
 $ cd proxy
 $ ./proxy 1234
-Starting LCA Manager in service mode with arguments hello-world-server 10.11.17.10:8080
-Setting stream handlers
-Creating DHT
-Connecting to bootstrap nodes...
-Connected to bootstrap node: {12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X: [/ip4/10.11.17.32/tcp/4001]}
-Connected to bootstrap node: {QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk: [/ip4/10.11.17.15/tcp/4001]}
-Connected to 5 peers!
-Creating Routing Discovery
-Finished setting up libp2p Node with PID QmPwKBtQ4zgF3HsSU6itot5WLMSBZcuZLNVgb1PNRDY245 and Multiaddresses [/ip4/127.0.0.1/tcp/40588 /ip4/10.11.17.10/tcp/40588 /ip6/::1/tcp/45279]
-Connecting to: {QmWTs3McLrTjuAdNsEoh7J8uYa2ZDbWsBkg8UV2t2Jn1s1: [/ip4/10.11.17.13/tcp/46042 /ip6/::1/tcp/35435 /ip4/127.0.0.1/tcp/46042]}
-Setting stream handlers
-Creating DHT
-Connecting to bootstrap nodes...
-Connected to bootstrap node: {12D3KooWGegi4bWDPw9f6x2mZ6zxtsjR8w4ax1tEMDKCNqdYBt7X: [/ip4/10.11.17.32/tcp/4001]}
-Connected to bootstrap node: {QmeZvvPZgrpgSLFyTYwCUEbyK6Ks8Cjm2GGrP2PA78zjAk: [/ip4/10.11.17.15/tcp/4001]}
-Connected to 2 peers!
-Creating Routing Discovery
-Finished setting up libp2p Node with PID Qmb6envkTd1fPWaj5ysTjGPjAvYMCjdFw3gMQYFf6zRGhS and Multiaddresses [/ip4/127.0.0.1/tcp/38168 /ip4/10.11.17.10/tcp/38168 /ip6/::1/tcp/44438]
-Launching proxy PeerCache instance
-Setting performance requirements based on perf.conf soft limit: 100ms hard limit: 1s
-Starting HTTP Proxy on 127.0.0.1:1234
-Launching cache update function
 ```
+Run `$ proxy -help` for more commandline options
 
 ## Advanced Usage
 
