@@ -19,6 +19,10 @@ import (
 
     "github.com/multiformats/go-multiaddr"
 
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promauto"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+
     "github.com/PhysarumSM/common/p2pnode"
     "github.com/PhysarumSM/common/p2putil"
     "github.com/PhysarumSM/common/util"
@@ -37,14 +41,23 @@ func init() {
     log.SetFlags(log.Ldate | log.Lmicroseconds | log.Lshortfile)
 }
 
-// Global LCA Manager instance to handle peer search and allocation
-var manager lca.LCAManager
+var (
+    // Global LCA Manager instance to handle peer search and allocation
+    manager lca.LCAManager
+    // Global Peer Cache instance to cache connected peers
+    peerCache *pcache.PeerCache
+    // Global Registry Cache instance to cache service registry info
+    registryCache *rcache.RegistryCache
+    // Prometheus gauge to export metrics
+    tslsr time.Time
+    tslsrGauge = promauto.NewGauge(
+        prometheus.GaugeOpts{
+            Name: "proxy_time_since_last_serviced_request",
+            Help: "Time since last request was serviced by the proxy instance (ms)",
+        },
+    )
+)
 
-// Global Peer Cache instance to cache connected peers
-var peerCache *pcache.PeerCache
-
-// Global Registry Cache instance to cache service registry info
-var registryCache *rcache.RegistryCache
 
 func runRequest(servName string, servInfo registry.ServiceInfo, req *http.Request) (*http.Response, error) {
     var err error
@@ -182,6 +195,12 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     w.WriteHeader(resp.StatusCode)
     // Copy body
     io.Copy(w, resp.Body)
+
+    // if it got to here, we log the successful service to prometheus
+    //tslsrMutex.lock()
+    //tslsr := time.Now()
+    //tslsrMutex.unlock()
+
     return
 }
 
@@ -220,6 +239,15 @@ func customUsage() {
             "Using \"anonymous mode\" allows a client to access the network without\n" +
             "having to register and advertise itself in the network."
     fmt.Fprint(flag.CommandLine.Output(), "\n" + s + "\n")
+}
+
+func exportMetrics() {
+    ticker := time.NewTicker(time.Second)
+
+    for {
+        <-ticker.C
+        tslsrGauge.Set(float64(time.Now().Sub(tslsr) * time.Millisecond))
+    }
 }
 
 func main() {
@@ -309,6 +337,17 @@ func main() {
             }
         }
     }
+
+    // Start data collection thread
+    tslsr = time.Now()
+    go exportMetrics()
+
+    // Map Prometheus metrics scrape path to handler function
+    pMetricsPath := "/metrics" // Make configurable?
+    http.Handle(pMetricsPath, promhttp.Handler())
+
+    // Start server in separate goroutine
+    go http.ListenAndServe(":9100", nil)
 
     // If CLI didn't specify a PSK, check the environment variables
     if *psk == nil {
