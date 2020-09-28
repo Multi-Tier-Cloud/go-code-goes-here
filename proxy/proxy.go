@@ -47,7 +47,7 @@ var (
     registryCache *rcache.RegistryCache
     // Variable to keep track of "time of last serviced request"
     tolsr time.Time
-    tolsrMutex sync.RWMutex
+    tolsrMux sync.Mutex
 )
 
 
@@ -190,9 +190,9 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
 
     // if it got to here, we log the successful service to prometheus
     log.Printf("Updating time of last serviced request")
-    tolsrMutex.Lock()
+    tolsrMux.Lock()
     tolsr = time.Now()
-    tolsrMutex.Unlock()
+    tolsrMux.Unlock()
     log.Printf("Updated time of last serviced request")
 
     return
@@ -236,9 +236,11 @@ func customUsage() {
 }
 
 func httpMetricsHandler(w http.ResponseWriter, r *http.Request) {
-    tolsrMutex.RLock()
+    log.Printf("Fetching time of last serviced request")
+    tolsrMux.Lock()
     oldTime := tolsr
-    tolsrMutex.RUnlock()
+    tolsrMux.Unlock()
+    log.Printf("Fetched time of last serviced request")
     fmt.Fprintf(w, "%d\n", time.Now().Sub(oldTime) / time.Second)
 }
 
