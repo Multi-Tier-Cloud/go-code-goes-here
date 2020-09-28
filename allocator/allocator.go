@@ -6,8 +6,9 @@ import (
     "flag"
     "io/ioutil"
     "log"
-    "os"
     "net/http"
+    "os"
+    "time"
 
     "github.com/libp2p/go-libp2p-core/pnet"
 
@@ -124,10 +125,18 @@ func main () {
 
     // Spawn LCA Allocator
     log.Println("Spawning LCA Allocator")
-    _, err = lca.NewLCAAllocator(ctx, nodeConfig, sPsk)
+    node, err := lca.NewLCAAllocator(ctx, nodeConfig, sPsk)
     if err != nil {
         log.Fatalln(err)
     }
+
+    go func() {
+        ticker := time.NewTicker(time.Minute)
+        for {
+            <-ticker.C
+            node.CullUnusedServices()
+        }
+    }()
 
     // Wait for connection
     log.Println("Waiting for requests...")

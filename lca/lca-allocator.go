@@ -4,10 +4,14 @@ import (
     "bufio"
     "context"
     "fmt"
+    "io/ioutil"
+    "log"
+    "net/http"
     "regexp"
     "strconv"
     "strings"
-    "log"
+    "sync"
+    "time"
 
     "github.com/libp2p/go-libp2p-core/network"
 
@@ -21,12 +25,83 @@ import (
 // Alias for p2pnode.Node for type safety
 type LCAAllocator struct {
     Host p2pnode.Node
+    services map[string]string
+    servicesMutex sync.Mutex
+}
+
+func cmdStartProgram(bootstraps []multiaddr.Multiaddr, sPsk string, imageName string,
+         services map[string]string, servicesMutex *sync.Mutex,
+         rw *bufio.ReadWriter) string {
+    _, err := docker_driver.PullImage(imageName)
+    if err != nil {
+        log.Println("Error calling Docker PullImage()\n", err)
+        return LCAPErrAllocFail
+    }
+    ipAddress, err := util.GetIPAddress()
+    if err != nil {
+        log.Println("Error getting IP address\n", err)
+        return LCAPErrAllocFail
+    }
+    pp, err := util.GetFreePort()
+    if err != nil {
+        log.Println("Error getting free port for proxy\n", err)
+        return LCAPErrAllocFail
+    }
+    sp, err := util.GetFreePort()
+    if err != nil {
+        log.Println("Error getting free port for service\n", err)
+        return LCAPErrAllocFail
+    }
+    mp, err := util.GetFreePort()
+    if err != nil {
+        log.Println("Error getting free port for service\n", err)
+        return LCAPErrAllocFail
+    }
+    proxyPort := strconv.Itoa(pp)
+    servicePort := strconv.Itoa(sp)
+    metricsPort := strconv.Itoa(mp)
+    strBootstraps := []string{}
+    for _, addr := range bootstraps {
+        strBootstraps = append(strBootstraps, addr.String())
+    }
+
+    cfg := docker_driver.DockerConfig{
+        Image: imageName,
+        Network: "host",
+        Env: []string{
+            "PROXY_IP=" + ipAddress,
+            "PROXY_PORT=" + proxyPort,
+            "SERVICE_PORT=" + servicePort,
+            "METRICS_PORT=" + metricsPort,
+            "P2P_BOOTSTRAPS=" + strings.Join(strBootstraps, " "),
+            "P2P_PSK=" + sPsk,
+        },
+    }
+    cid, err := docker_driver.RunContainer(cfg)
+    if err != nil {
+        log.Println("Error calling Docker RunContainer()\n", err)
+        return LCAPErrAllocFail
+    }
+    err = write(rw, fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
+    if err != nil {
+        log.Println("Error writing to buffer\n", err)
+        return LCAPErrAllocFail
+    }
+
+    servicesMutex.Lock()
+    services[metricsPort] = cid
+    servicesMutex.Unlock()
+
+    log.Println("Started new service", imageName, "with metric at", metricsPort)
+
+    return ""
 }
 
 // Generator function for LCA handler function
 // Used to allow the handler to remember the bootstraps and PSK
-func NewLCAHandler(bootstraps []multiaddr.Multiaddr,
-                    sPsk string) func(network.Stream) {
+func NewLCAHandler(bootstraps []multiaddr.Multiaddr, sPsk string,
+         services map[string]string,
+         servicesMutex *sync.Mutex) func(network.Stream) {
 
     // The handler function takes care of accepting requests
     // from an LCA Manager and allocating the requested service
@@ -50,91 +125,19 @@ func NewLCAHandler(bootstraps []multiaddr.Multiaddr,
             case LCAAPCmdStartProgram: {
                 imageName := match[2]
                 log.Println("Received command", match[1], "starting image:", match[2])
-                _, err = docker_driver.PullImage(imageName)
-                if err != nil {
-                    log.Println("Error calling Docker PullImage()\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
+                result := cmdStartProgram(bootstraps, sPsk,
+                          imageName, services, servicesMutex, rw)
+                if result != "" {
+                    err2 := write(rw, result)
                     if err2 != nil {
                         log.Println("Error writing to buffer\n", err2)
                     }
-                    return
-                }
-                ipAddress, err := util.GetIPAddress()
-                if err != nil {
-                    log.Println("Error getting IP address\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
-                    if err2 != nil {
-                        log.Println("Error writing to buffer\n", err2)
-                    }
-                    return
-                }
-                pp, err := util.GetFreePort()
-                if err != nil {
-                    log.Println("Error getting free port for proxy\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
-                    if err2 != nil {
-                        log.Println("Error writing to buffer\n", err2)
-                    }
-                    return
-                }
-                sp, err := util.GetFreePort()
-                if err != nil {
-                    log.Println("Error getting free port for service\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
-                    if err2 != nil {
-                        log.Println("Error writing to buffer\n", err2)
-                    }
-                    return
-                }
-                mp, err := util.GetFreePort()
-                if err != nil {
-                    log.Println("Error getting free port for service\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
-                    if err2 != nil {
-                        log.Println("Error writing to buffer\n", err2)
-                    }
-                    return
-                }
-                proxyPort := strconv.Itoa(pp)
-                servicePort := strconv.Itoa(sp)
-                metricsPort := strconv.Itoa(mp)
-                strBootstraps := []string{}
-                for _, addr := range bootstraps {
-                    strBootstraps = append(strBootstraps, addr.String())
-                }
-
-                cfg := docker_driver.DockerConfig{
-                    Image: imageName,
-                    Network: "host",
-                    Env: []string{
-                        "PROXY_IP=" + ipAddress,
-                        "PROXY_PORT=" + proxyPort,
-                        "SERVICE_PORT=" + servicePort,
-                        "METRICS_PORT=" + metricsPort,
-                        "P2P_BOOTSTRAPS=" + strings.Join(strBootstraps, " "),
-                        "P2P_PSK=" + sPsk,
-                    },
-                }
-                _, err = docker_driver.RunContainer(cfg)
-                if err != nil {
-                    log.Println("Error calling Docker RunContainer()\n", err)
-                    err2 := write(rw, LCAPErrAllocFail)
-                    if err2 != nil {
-                        log.Println("Error writing to buffer\n", err2)
-                    }
-                    return
-                }
-                err = write(rw, fmt.Sprintf("%s\n", ipAddress + ":" + servicePort))
-                if err != nil {
-                    log.Println("Error writing to buffer\n", err)
-                    return
                 }
             }
             default: {
                 err = write(rw, LCAPErrUnrecognized)
                 if err != nil {
                     log.Println("Error writing to buffer\n", err)
-                    return
                 }
             }
         }
@@ -176,11 +179,13 @@ func NewLCAAllocator(ctx context.Context,
         return node, err
     }
 
+    node.services = make(map[string]string)
     var allocHandler func(network.Stream)
     for _, addr := range multiaddrs {
         if strings.Contains(addr.String(), pubAddr) {
             cfg.BootstrapPeers = append(cfg.BootstrapPeers, addr)
-            allocHandler = NewLCAHandler(cfg.BootstrapPeers, sPsk)
+            allocHandler = NewLCAHandler(cfg.BootstrapPeers, sPsk,
+                               node.services, &node.servicesMutex)
             break
         }
     }
@@ -193,4 +198,38 @@ func NewLCAAllocator(ctx context.Context,
     node.Host.Host.SetStreamHandler(LCAAllocatorProtocolID, allocHandler)
 
     return node, nil
+}
+
+func (lca *LCAAllocator) CullUnusedServices() {
+    var servicesToCull []string
+    lca.servicesMutex.Lock()
+    for metricsPort, cid := range lca.services {
+        resp, err := http.Get("http://127.0.0.1:" + metricsPort)
+        if resp != nil {
+            defer resp.Body.Close()
+        }
+        if err != nil {
+            servicesToCull = append(servicesToCull, cid)
+            continue
+        }
+        body, err := ioutil.ReadAll(resp.Body)
+        if err != nil {
+            servicesToCull = append(servicesToCull, cid)
+            continue
+        }
+        tslsr, err := strconv.ParseInt(string(body), 10, 64)
+        if err != nil {
+            servicesToCull = append(servicesToCull, cid)
+            continue
+        }
+        if (time.Duration(tslsr) > time.Minute) {
+            servicesToCull = append(servicesToCull, cid)
+            continue
+        }
+    }
+    for _, cid := range servicesToCull {
+        docker_driver.StopContainer(cid)
+        docker_driver.DeleteContainer(cid)
+    }
+    lca.servicesMutex.Unlock()
 }

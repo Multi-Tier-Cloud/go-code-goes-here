@@ -189,9 +189,11 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     io.Copy(w, resp.Body)
 
     // if it got to here, we log the successful service to prometheus
+    log.Printf("Updating time of last serviced request")
     tolsrMutex.Lock()
     tolsr = time.Now()
     tolsrMutex.Unlock()
+    log.Printf("Updated time of last serviced request")
 
     return
 }
