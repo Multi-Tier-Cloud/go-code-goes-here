@@ -12,16 +12,13 @@ import (
     "net/http"
     "os"
     "strings"
+    "sync"
     "time"
 
     "github.com/libp2p/go-libp2p-core/peer"
     "github.com/libp2p/go-libp2p-core/pnet"
 
     "github.com/multiformats/go-multiaddr"
-
-    "github.com/prometheus/client_golang/prometheus"
-    "github.com/prometheus/client_golang/prometheus/promauto"
-    "github.com/prometheus/client_golang/prometheus/promhttp"
 
     "github.com/PhysarumSM/common/p2pnode"
     "github.com/PhysarumSM/common/p2putil"
@@ -48,14 +45,9 @@ var (
     peerCache *pcache.PeerCache
     // Global Registry Cache instance to cache service registry info
     registryCache *rcache.RegistryCache
-    // Prometheus gauge to export metrics
-    tslsr time.Time
-    tslsrGauge = promauto.NewGauge(
-        prometheus.GaugeOpts{
-            Name: "proxy_time_since_last_serviced_request",
-            Help: "Time since last request was serviced by the proxy instance (ms)",
-        },
-    )
+    // Variable to keep track of "time of last serviced request"
+    tolsr time.Time
+    tolsrMutex sync.RWMutex
 )
 
 
@@ -197,9 +189,9 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     io.Copy(w, resp.Body)
 
     // if it got to here, we log the successful service to prometheus
-    //tslsrMutex.lock()
-    //tslsr := time.Now()
-    //tslsrMutex.unlock()
+    tolsrMutex.Lock()
+    tolsr = time.Now()
+    tolsrMutex.Unlock()
 
     return
 }
@@ -241,13 +233,11 @@ func customUsage() {
     fmt.Fprint(flag.CommandLine.Output(), "\n" + s + "\n")
 }
 
-func exportMetrics() {
-    ticker := time.NewTicker(time.Second)
-
-    for {
-        <-ticker.C
-        tslsrGauge.Set(float64(time.Now().Sub(tslsr) * time.Millisecond))
-    }
+func httpMetricsHandler(w http.ResponseWriter, r *http.Request) {
+    tolsrMutex.RLock()
+    oldTime := tolsr
+    tolsrMutex.RUnlock()
+    fmt.Fprintf(w, "%d\n", time.Now().Sub(oldTime) / time.Second)
 }
 
 func main() {
@@ -275,19 +265,23 @@ func main() {
     flag.Parse() // Parse flag arguments
 
     // Parse positional arguments
-    var mode string
-    var port string
-    var service string
-    var address string
+    var (
+        mode string
+        port string
+        service string
+        address string
+        metricsPort string
+    )
     switch flag.NArg() {
     case 1:
         mode = "anonymous"
         port = flag.Arg(0)
-    case 3:
+    case 4:
         mode = "service"
         port = flag.Arg(0)
         service = flag.Arg(1)
         address = flag.Arg(2)
+        metricsPort = flag.Arg(3)
     default:
         flag.Usage()
         os.Exit(1)
@@ -338,17 +332,6 @@ func main() {
         }
     }
 
-    // Start data collection thread
-    tslsr = time.Now()
-    go exportMetrics()
-
-    // Map Prometheus metrics scrape path to handler function
-    pMetricsPath := "/metrics" // Make configurable?
-    http.Handle(pMetricsPath, promhttp.Handler())
-
-    // Start server in separate goroutine
-    go http.ListenAndServe(":9100", nil)
-
     // If CLI didn't specify a PSK, check the environment variables
     if *psk == nil {
         envPsk, err := util.GetEnvPSK()
@@ -393,7 +376,18 @@ func main() {
     // Setup HTTP proxy service
     // This port number must be fixed in order for the proxy to be portable
     // Docker must route this port to an available one externally
+    httpRequestMux := http.NewServeMux()
+    httpRequestMux.HandleFunc("/", httpRequestHandler)
     log.Println("Starting HTTP Proxy on 127.0.0.1:" + port)
-    http.HandleFunc("/", httpRequestHandler)
-    log.Fatal(http.ListenAndServe("127.0.0.1:" + port, nil))
+    go http.ListenAndServe("127.0.0.1:" + port, httpRequestMux)
+
+    if mode == "service" {
+        httpMetricsMux := http.NewServeMux()
+        httpMetricsMux.HandleFunc("/", httpMetricsHandler)
+        tolsr = time.Now()
+        log.Println("Starting HTTP Metrics Service on 127.0.0.1:" + metricsPort)
+        go http.ListenAndServe("127.0.0.1:" + metricsPort, httpMetricsMux)
+    }
+
+    select {}
 }

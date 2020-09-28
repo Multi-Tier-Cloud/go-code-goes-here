@@ -86,8 +86,18 @@ func NewLCAHandler(bootstraps []multiaddr.Multiaddr,
                     }
                     return
                 }
+                mp, err := util.GetFreePort()
+                if err != nil {
+                    log.Println("Error getting free port for service\n", err)
+                    err2 := write(rw, LCAPErrAllocFail)
+                    if err2 != nil {
+                        log.Println("Error writing to buffer\n", err2)
+                    }
+                    return
+                }
                 proxyPort := strconv.Itoa(pp)
                 servicePort := strconv.Itoa(sp)
+                metricsPort := strconv.Itoa(mp)
                 strBootstraps := []string{}
                 for _, addr := range bootstraps {
                     strBootstraps = append(strBootstraps, addr.String())
@@ -100,6 +110,7 @@ func NewLCAHandler(bootstraps []multiaddr.Multiaddr,
                         "PROXY_IP=" + ipAddress,
                         "PROXY_PORT=" + proxyPort,
                         "SERVICE_PORT=" + servicePort,
+                        "METRICS_PORT=" + metricsPort,
                         "P2P_BOOTSTRAPS=" + strings.Join(strBootstraps, " "),
                         "P2P_PSK=" + sPsk,
                     },
