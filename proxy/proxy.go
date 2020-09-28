@@ -47,7 +47,7 @@ var (
     registryCache *rcache.RegistryCache
     // Variable to keep track of "time of last serviced request"
     tolsr time.Time
-    tolsrMux sync.Mutex{}
+    tolsrMux sync.Mutex
 )
 
 
