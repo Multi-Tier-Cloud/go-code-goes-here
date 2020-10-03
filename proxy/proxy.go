@@ -189,13 +189,12 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     io.Copy(w, resp.Body)
 
     // if it got to here, we log the successful service to prometheus
-    log.Printf("Acquiring lock for time of last serviced request")
-    tolsrMux.Lock()
     log.Printf("Updating time of last serviced request")
-    tolsr = time.Now()
-    log.Printf("Updated time of last serviced request")
+    tolsrMux.Lock()
+    newTolsr := time.Now()
+    tolsr = newTolsr
     tolsrMux.Unlock()
-    log.Printf("Released lock for time of last serviced request")
+    log.Printf("New time of last serviced request is %s\n", newTolsr)
 
     return
 }

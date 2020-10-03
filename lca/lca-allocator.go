@@ -11,7 +11,6 @@ import (
     "strconv"
     "strings"
     "sync"
-    "time"
 
     "github.com/libp2p/go-libp2p-core/network"
 
@@ -25,7 +24,10 @@ import (
 // Alias for p2pnode.Node for type safety
 type LCAAllocator struct {
     Host p2pnode.Node
+    // Use a map for fast insert/delete
+    // and ease of passing into functions
     services map[string]string
+    // lock for services map
     servicesMutex sync.Mutex
 }
 
@@ -200,36 +202,50 @@ func NewLCAAllocator(ctx context.Context,
     return node, nil
 }
 
+type Service struct {
+    MetricsPort string
+    Cid string
+}
+
 func (lca *LCAAllocator) CullUnusedServices() {
-    var servicesToCull []string
+    var servicesToCull []Service
     lca.servicesMutex.Lock()
+    defer lca.servicesMutex.Unlock()
     for metricsPort, cid := range lca.services {
         resp, err := http.Get("http://127.0.0.1:" + metricsPort)
         if resp != nil {
             defer resp.Body.Close()
         }
         if err != nil {
-            servicesToCull = append(servicesToCull, cid)
+            log.Printf("Adding %s to cull list because resp error\n", cid)
+            servicesToCull = append(servicesToCull, Service{metricsPort, cid})
             continue
         }
         body, err := ioutil.ReadAll(resp.Body)
         if err != nil {
-            servicesToCull = append(servicesToCull, cid)
+            log.Printf("Adding %s to cull list because read error\n", cid)
+            servicesToCull = append(servicesToCull, Service{metricsPort, cid})
             continue
         }
-        tslsr, err := strconv.ParseInt(string(body), 10, 64)
+        tslsrString := strings.TrimSpace(string(body))
+        tslsr, err := strconv.ParseInt(tslsrString, 10, 64)
         if err != nil {
-            servicesToCull = append(servicesToCull, cid)
+            log.Printf("Adding %s to cull list because conv error\n", cid)
+            servicesToCull = append(servicesToCull, Service{metricsPort, cid})
             continue
         }
-        if (time.Duration(tslsr) > time.Minute) {
-            servicesToCull = append(servicesToCull, cid)
+        if (tslsr > 60) {
+            log.Printf("Adding %s to cull list because over time\n", cid)
+            log.Printf("Got %d while limit is %d\n", tslsr, 60)
+            servicesToCull = append(servicesToCull, Service{metricsPort, cid})
             continue
         }
     }
-    for _, cid := range servicesToCull {
-        docker_driver.StopContainer(cid)
-        docker_driver.DeleteContainer(cid)
+    for _, service := range servicesToCull {
+        log.Printf("Culling service with metrics port %s and cid %s\n",
+            service.MetricsPort, service.Cid)
+        delete(lca.services, service.MetricsPort)
+        docker_driver.StopContainer(service.Cid)
+        docker_driver.DeleteContainer(service.Cid)
     }
-    lca.servicesMutex.Unlock()
 }
