@@ -12,7 +12,6 @@ import (
     "net/http"
     "os"
     "strings"
-    "sync"
     "time"
 
     "github.com/libp2p/go-libp2p-core/peer"
@@ -40,14 +39,11 @@ func init() {
 
 var (
     // Global LCA Manager instance to handle peer search and allocation
-    manager lca.LCAManager
+    manager *lca.LCAManager
     // Global Peer Cache instance to cache connected peers
     peerCache *pcache.PeerCache
     // Global Registry Cache instance to cache service registry info
     registryCache *rcache.RegistryCache
-    // Variable to keep track of "time of last serviced request"
-    tolsr time.Time
-    tolsrMux sync.Mutex
 )
 
 
@@ -188,14 +184,6 @@ func httpRequestHandler(w http.ResponseWriter, r *http.Request) {
     // Copy body
     io.Copy(w, resp.Body)
 
-    // if it got to here, we log the successful service to prometheus
-    log.Printf("Updating time of last serviced request")
-    tolsrMux.Lock()
-    newTolsr := time.Now()
-    tolsr = newTolsr
-    tolsrMux.Unlock()
-    log.Printf("New time of last serviced request is %s\n", newTolsr)
-
     return
 }
 
@@ -238,9 +226,9 @@ func customUsage() {
 
 func httpMetricsHandler(w http.ResponseWriter, r *http.Request) {
     log.Printf("Fetching time of last serviced request")
-    tolsrMux.Lock()
-    oldTime := tolsr
-    tolsrMux.Unlock()
+    manager.TolsrMux.Lock()
+    oldTime := manager.Tolsr
+    manager.TolsrMux.Unlock()
     log.Printf("Fetched time of last serviced request")
     fmt.Fprintf(w, "%d\n", time.Now().Sub(oldTime) / time.Second)
 }
@@ -375,7 +363,7 @@ func main() {
 
     // Create peer cache instance and start cache update loop
     log.Println("Launching proxy PeerCache instance")
-    peerCache = pcache.NewPeerCache(&manager.Host, registryCache)
+    peerCache = pcache.NewPeerCache(&(manager.Host), registryCache)
     go peerCache.UpdateCache()
 
     // Setup HTTP proxy service
@@ -389,7 +377,9 @@ func main() {
     if mode == "service" {
         httpMetricsMux := http.NewServeMux()
         httpMetricsMux.HandleFunc("/", httpMetricsHandler)
-        tolsr = time.Now()
+        manager.TolsrMux.Lock()
+        manager.Tolsr = time.Now()
+        manager.TolsrMux.Unlock()
         log.Println("Starting HTTP Metrics Service on 127.0.0.1:" + metricsPort)
         go http.ListenAndServe("127.0.0.1:" + metricsPort, httpMetricsMux)
     }

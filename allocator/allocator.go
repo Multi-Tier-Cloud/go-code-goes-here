@@ -125,7 +125,7 @@ func main () {
 
     // Spawn LCA Allocator
     log.Println("Spawning LCA Allocator")
-    node, err := lca.NewLCAAllocator(ctx, nodeConfig, sPsk)
+    allocator, err := lca.NewLCAAllocator(ctx, nodeConfig, sPsk)
     if err != nil {
         log.Fatalln(err)
     }
@@ -134,7 +134,7 @@ func main () {
         ticker := time.NewTicker(time.Minute)
         for {
             <-ticker.C
-            node.CullUnusedServices()
+            allocator.CullUnusedServices()
         }
     }()
 

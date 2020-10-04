@@ -12,6 +12,8 @@ import (
     "regexp"
     "runtime/debug"
     "strings"
+    "sync"
+    "time"
     "log"
 
     "github.com/libp2p/go-libp2p-core/network"
@@ -28,6 +30,9 @@ type LCAManager struct {
     Host       p2pnode.Node
     // Identifier hash for the service this node is responsible for
     P2PHash    string
+    // Variable to keep track of "time of last serviced request"
+    Tolsr time.Time
+    TolsrMux sync.Mutex
 }
 
 // Stub
@@ -238,7 +243,7 @@ func (lca *LCAManager) Request(pid peer.ID, req *http.Request) (*http.Response, 
 // Used to allow the Handler to remember the service address
 // Generated LCAManagerHandler pings the service it is responsible for to check
 // that it is still up then sends the service address back to the requester.
-func RequestHandler(address string) func(network.Stream) {
+func RequestHandler(address string, lca *LCAManager) func(network.Stream) {
     return func(stream network.Stream) {
         defer stream.Close()
         defer func() {
@@ -315,23 +320,31 @@ func RequestHandler(address string) func(network.Stream) {
         if err != nil {
             panic(err)
         }
+
+        // if it got to here, we log the successful service
+        log.Printf("Updating time of last serviced request")
+        lca.TolsrMux.Lock()
+        newTolsr := time.Now()
+        lca.Tolsr = newTolsr
+        lca.TolsrMux.Unlock()
+        log.Printf("New time of last serviced request is %s\n", newTolsr)
     }
 }
 
 // Constructor for LCA Manager instance
 // If serviceName is empty string start instance in "anonymous mode"
 func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
-                    serviceName string, serviceAddress string) (LCAManager, error) {
+                    serviceName string, serviceAddress string) (*LCAManager, error) {
     var err error
 
     var node LCAManager
 
     // Set stream handler, protocol ID and create the node
-    cfg.StreamHandlers = append(cfg.StreamHandlers, RequestHandler(serviceAddress))
+    cfg.StreamHandlers = append(cfg.StreamHandlers, RequestHandler(serviceAddress, &node))
     cfg.HandlerProtocolIDs = append(cfg.HandlerProtocolIDs, LCAManagerRequestProtID)
     node.Host, err = p2pnode.NewNode(ctx, cfg)
     if err != nil {
-        return node, err
+        return nil, err
     }
 
     // Now that the node is created, it can be used to get the rendezvous
@@ -341,11 +354,11 @@ func NewLCAManager(ctx context.Context, cfg p2pnode.Config,
         info, err := registry.GetServiceWithHostRouting(node.Host.Ctx,
                          node.Host.Host, node.Host.RoutingDiscovery, serviceName)
         if err != nil {
-            return node, err
+            return nil, err
         }
         node.P2PHash = info.ContentHash
         node.Host.Advertise(node.P2PHash)
     }
 
-    return node, nil
+    return &node, nil
 }

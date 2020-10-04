@@ -155,7 +155,7 @@ func NewLCAHandler(bootstraps []multiaddr.Multiaddr, sPsk string,
 //   cfg: Configuration settings for the new P2P node
 //   sPsk: Un-hashed PSK passphrase to pass to spawned proxies
 func NewLCAAllocator(ctx context.Context,
-        cfg p2pnode.Config, sPsk string) (LCAAllocator, error) {
+        cfg p2pnode.Config, sPsk string) (*LCAAllocator, error) {
 
     var err error
     var node LCAAllocator
@@ -163,7 +163,7 @@ func NewLCAAllocator(ctx context.Context,
     cfg.Rendezvous = append(cfg.Rendezvous, LCAAllocatorRendezvous)
     node.Host, err = p2pnode.NewNode(ctx, cfg)
     if err != nil {
-        return node, err
+        return nil, err
     }
 
     // Find public-facing listening multiaddr for this node and
@@ -171,14 +171,14 @@ func NewLCAAllocator(ctx context.Context,
     multiaddrs, err := util.Whoami(node.Host.Host)
     if err != nil {
         log.Printf("ERROR: Unable to get addresses for node\n")
-        return node, err
+        return nil, err
     }
     pubAddr, err := util.GetIPAddress()
     if err != nil {
         // TODO: Should we allow cases where nodes are running in completely
         //       private networks w/ no access to the Internet??
         log.Printf("ERROR: Unable to get public address\n")
-        return node, err
+        return nil, err
     }
 
     node.services = make(map[string]string)
@@ -194,12 +194,12 @@ func NewLCAAllocator(ctx context.Context,
 
     if allocHandler == nil {
         log.Printf("ERROR: Unable to find a listening multiaddr for this node\n")
-        return node, err
+        return nil, err
     }
 
     node.Host.Host.SetStreamHandler(LCAAllocatorProtocolID, allocHandler)
 
-    return node, nil
+    return &node, nil
 }
 
 type Service struct {
